@@ -16,7 +16,7 @@ CoordMode "Mouse", "Screen"
 ; - Builds the ChatGPT prompt from prompt-template.md.
 ; - Uses a temporary hardcoded public URL instead of the GO B2B CMS URL.
 ; - Pastes the prompt into ChatGPT.
-; - Tries to copy one or more product images from the CMS Images tab and paste them into ChatGPT.
+; - Tries to copy one or more high-quality product images from the CMS Images tab and paste them into ChatGPT.
 ; - Stops before sending so the image attachment can be checked manually.
 ; - Extracts ChatGPT's automation block from the clipboard.
 ; - Pastes generated SEO fields into GO B2B.
@@ -31,12 +31,13 @@ CoordMode "Mouse", "Screen"
 ; ==========================================================
 
 cmsWinTitle := "GOb2b Admin - Cromartie Hobbycraft Limited - Catalogue Manager - Google Chrome"
-chatgptWinTitle := "Colour & Glaze - SEO Metadata Creation - Google Chrome"
+; chatgptWinTitle := "Colour & Glaze - SEO Metadata Creation - Google Chrome"
+chatgptWinTitle := "Colour & Glaze - Product SEO Metadata Setup - Google Chrome"
 
 ; Available modes:
 ; "full" = current existing workflow
 ; "metadata" = metadata-only workflow
-SeoAutomationMode := "full"
+SeoAutomationMode := "metadata"
 
 FullPromptTemplatePath := A_ScriptDir "\prompt-template.md"
 MetadataPromptTemplatePath := A_ScriptDir "\prompt-template-metadata-only.md"
@@ -48,7 +49,7 @@ backupDir := A_ScriptDir "\backups"
 
 ; Temporary hardcoded public product/category URL for {PAGE_URL} in the ChatGPT prompt.
 ; This avoids using the GO B2B CMS edit URL.
-hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Non-Fired-Colour/No-Fire-Snows-for-Bisque/..."
+hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Non-Fired-Colour/Crafters-Choice-Acrylic-Paints-59ml/Crafters-Choice-Fluorescent-Acrylic-Paints/..."
 
 ; Try to copy/paste the product image into ChatGPT after the prompt is pasted.
 ; The script still stops before sending so you can confirm the image attached correctly.
@@ -67,6 +68,20 @@ imageTargets := [
     Map("image", [399, 454], "details_button", [319, 555]),
     Map("image", [645, 451], "details_button", [571, 552])
 ]
+
+; High-quality image copy settings.
+; Process used for each image:
+; 1. Click the original image thumbnail/card listed in imageTargets.
+; 2. Copy the larger/high-quality preview image from this point.
+; Keep this enabled so ChatGPT receives the clearer image rather than the small thumbnail.
+copyHighQualityImagePreview := true
+highQualityImageCopyPoint := [334, 650]
+highQualityImagePreviewLoadDelayMs := 700
+
+; false = do not silently fall back to the old low-quality thumbnail copy if
+; the high-quality preview copy fails. Set to true only if you prefer an
+; automatic low-quality fallback instead of manually attaching the image.
+allowThumbnailImageCopyFallback := false
 
 ; Toggle with Ctrl + Alt + N.
 ; false = do not paste ChatGPT product name recommendation.
@@ -121,10 +136,12 @@ additionalProductNotesDefault := "N/A"
 ^!w:: CopyActiveWindowTitle()
 ^!c:: CaptureMouseCoords()
 ^!p:: OpenProductBuildPromptAndPasteToChatGPT()
-^!b:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
+; ^!b:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
+Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!i:: TryCopyCmsImagesToChatGPT()
 ^!n:: ToggleRecommendedProductName()
-^!o:: PasteCopiedChatGPTOutputToCms()
+; ^!o:: PasteCopiedChatGPTOutputToCms()
+Numpad6:: PasteCopiedChatGPTOutputToCms()
 ^!r:: Reload()
 Esc:: ExitApp()
 
@@ -572,22 +589,90 @@ TryCopyCmsSingleImageToChatGPT(imageIndex := 1, showResult := true) {
 }
 
 CopyCmsImageToClipboard(imageIndex := 1) {
-    global cmsWinTitle, imageContextCopyKey
+    global cmsWinTitle, imageContextCopyKey, copyHighQualityImagePreview, allowThumbnailImageCopyFallback
 
     ActivateWindow(cmsWinTitle)
     ClickPoint("images_tab", 800)
 
-    ; Method 1: click the image and try Ctrl+C.
+    ; Preferred method: click the configured image thumbnail/card, then copy
+    ; the larger/high-quality preview image from highQualityImageCopyPoint.
+    if copyHighQualityImagePreview {
+        if CopyHighQualityPreviewByCtrlC(imageIndex)
+            return true
+
+        ; Browser fallback for the high-quality preview: right-click the
+        ; larger preview and use Chrome's Copy image shortcut.
+        if CopyHighQualityPreviewByContextMenuKey(imageIndex, imageContextCopyKey)
+            return true
+
+        ; Avoid silently attaching the old low-quality thumbnail unless the
+        ; manual fallback setting is enabled near the top of this file.
+        if !allowThumbnailImageCopyFallback
+            return false
+    }
+
+    ; Optional legacy fallback methods. These preserve the old thumbnail copy
+    ; behaviour only when allowThumbnailImageCopyFallback is true.
     if CopyImageByCtrlC(imageIndex)
         return true
 
-    ; Method 2: right-click the image and use the browser's Copy image shortcut.
     ; On many Chrome installs, the shortcut is "y". If this does not work,
     ; test the context menu manually and change imageContextCopyKey near the top.
     if CopyImageByContextMenuKey(imageIndex, imageContextCopyKey)
         return true
 
     return false
+}
+
+CopyHighQualityPreviewByCtrlC(imageIndex := 1) {
+    global highQualityImageCopyPoint, highQualityImagePreviewLoadDelayMs
+
+    savedClip := ClipboardAll()
+    A_Clipboard := ""
+    Sleep 100
+
+    SelectCmsImageForPreview(imageIndex)
+    Sleep highQualityImagePreviewLoadDelayMs
+
+    ClickCoordinates(highQualityImageCopyPoint, 300)
+    Send "^c"
+
+    if ClipWait(2, true) {
+        return true
+    }
+
+    A_Clipboard := savedClip
+    return false
+}
+
+CopyHighQualityPreviewByContextMenuKey(imageIndex, copyKey) {
+    global highQualityImageCopyPoint, highQualityImagePreviewLoadDelayMs
+
+    savedClip := ClipboardAll()
+    A_Clipboard := ""
+    Sleep 100
+
+    SelectCmsImageForPreview(imageIndex)
+    Sleep highQualityImagePreviewLoadDelayMs
+
+    MouseMove highQualityImageCopyPoint[1], highQualityImageCopyPoint[2]
+    Sleep 150
+    Click "Right"
+    Sleep 500
+    Send copyKey
+
+    if ClipWait(3, true) {
+        return true
+    }
+
+    Send "{Esc}"
+    A_Clipboard := savedClip
+    return false
+}
+
+SelectCmsImageForPreview(imageIndex := 1) {
+    target := GetImageTarget(imageIndex)
+    ClickCoordinates(target["image"], 500)
 }
 
 CopyImageByCtrlC(imageIndex := 1) {

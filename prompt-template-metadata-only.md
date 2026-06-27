@@ -5,7 +5,7 @@ Use:
 - `cromartie_colour_glaze_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_colour_glaze_product_page_seo_strategy_workbook_aligned.md`
 - `cromartie_colour_glaze_keyword_map_clean_final_reference.xlsx` where useful for keyword ownership, department hierarchy and cannibalisation checks
-- `cromartie_colour_glaze_product_page_recurring_fixes_v1.md` if available, especially for naming, metadata and image SEO rules
+- `cromartie_colour_glaze_product_page_recurring_fixes_v2.md` if available, especially for naming, metadata and image SEO rules
 
 Metadata-only mode:
 
@@ -92,6 +92,7 @@ Meta description rules:
 - Avoid unsupported claims.
 - Do not include product codes, SKUs or item codes by default because the CMS/product template already displays product codes.
 - Keep it under 160 characters where possible.
+- Avoid repeating the same thing for every product in a department, try and make them unique
 
 Image SEO rules:
 
