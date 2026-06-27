@@ -33,7 +33,16 @@ CoordMode "Mouse", "Screen"
 cmsWinTitle := "GOb2b Admin - Cromartie Hobbycraft Limited - Catalogue Manager - Google Chrome"
 chatgptWinTitle := "Colour & Glaze - SEO Metadata Creation - Google Chrome"
 
-promptTemplatePath := A_ScriptDir "\prompt-template.md"
+; Available modes:
+; "full" = current existing workflow
+; "metadata" = metadata-only workflow
+SeoAutomationMode := "full"
+
+FullPromptTemplatePath := A_ScriptDir "\prompt-template.md"
+MetadataPromptTemplatePath := A_ScriptDir "\prompt-template-metadata-only.md"
+
+; Kept as a familiar reference for the existing full workflow.
+promptTemplatePath := FullPromptTemplatePath
 logDir := A_ScriptDir "\logs"
 backupDir := A_ScriptDir "\backups"
 
@@ -128,9 +137,9 @@ Esc:: ExitApp()
 ; ==========================================================
 
 TestScript() {
-    global useRecommendedProductName
-    mode := useRecommendedProductName ? "ON" : "OFF"
-    Flash("Script running. Product name recommendation: " mode)
+    global useRecommendedProductName, SeoAutomationMode
+    nameMode := useRecommendedProductName ? "ON" : "OFF"
+    Flash("Script running. SEO mode: " SeoAutomationMode ". Product name recommendation: " nameMode)
 }
 
 CopyActiveWindowTitle() {
@@ -200,10 +209,11 @@ BuildPromptFromOpenProductPageAndPasteToChatGPT() {
 ; ==========================================================
 
 BuildPromptFromCurrentProductPage(pageUrl) {
-    global cmsWinTitle, chatgptWinTitle, promptTemplatePath
+    global cmsWinTitle, chatgptWinTitle, SeoAutomationMode
     global requiredInternalLinksDefault, imageNotesDefault, additionalProductNotesDefault
     global attemptImageCopyAfterPrompt, imageCountToProcess
 
+    ValidateSeoAutomationMode()
     ActivateWindow(cmsWinTitle)
     ValidateImageTargetConfig()
 
@@ -228,21 +238,25 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     LogText("original-fields", originalFields)
     BackupText("original-fields", originalFields)
 
-    if !FileExist(promptTemplatePath) {
-        throw Error("prompt-template.md was not found beside this script: " promptTemplatePath)
+    templatePath := GetPromptTemplatePath()
+
+    if !FileExist(templatePath) {
+        throw Error("Prompt template was not found beside this script for SEO mode '" SeoAutomationMode "': " templatePath)
     }
 
-    template := FileRead(promptTemplatePath, "UTF-8")
+    template := ReadPromptTemplateFile(templatePath)
 
-    prompt := template
-    prompt := StrReplace(prompt, "{{PAGE_URL}}", CleanText(pageUrl))
-    prompt := StrReplace(prompt, "{{PRODUCT_NAME}}", CleanText(productName))
-    prompt := StrReplace(prompt, "{{CURRENT_META_TITLE}}", EmptyToNA(currentMetaTitle))
-    prompt := StrReplace(prompt, "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(currentMetaDescription))
-    prompt := StrReplace(prompt, "{{CURRENT_HTML_SNIPPET}}", CleanText(currentHtmlSnippet))
-    ; prompt := StrReplace(prompt, "{{REQUIRED_INTERNAL_LINKS}}", requiredInternalLinksDefault)
-    prompt := StrReplace(prompt, "{{IMAGE_NOTES}}", imageNotesDefault)
-    ; prompt := StrReplace(prompt, "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotesDefault)
+    prompt := BuildPromptFromTemplate(
+        template,
+        pageUrl,
+        productName,
+        currentMetaTitle,
+        currentMetaDescription,
+        currentHtmlSnippet,
+        requiredInternalLinksDefault,
+        imageNotesDefault,
+        additionalProductNotesDefault
+    )
     prompt := EnsurePromptSupportsImageCount(prompt, imageCountToProcess)
 
     LogText("prompt", prompt)
@@ -256,6 +270,61 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     }
 
     Flash("Prompt pasted. Attach image manually.")
+}
+
+; ==========================================================
+; MODE AND PROMPT TEMPLATE HELPERS
+; ==========================================================
+
+ValidateSeoAutomationMode() {
+    global SeoAutomationMode
+    mode := GetSeoAutomationMode()
+
+    if mode != "full" && mode != "metadata" {
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full' or 'metadata'.")
+    }
+}
+
+GetSeoAutomationMode() {
+    global SeoAutomationMode
+    return StrLower(Trim(SeoAutomationMode))
+}
+
+IsFullMode() {
+    return GetSeoAutomationMode() = "full"
+}
+
+IsMetadataOnlyMode() {
+    return GetSeoAutomationMode() = "metadata"
+}
+
+GetPromptTemplatePath() {
+    global FullPromptTemplatePath, MetadataPromptTemplatePath
+
+    ValidateSeoAutomationMode()
+
+    if IsMetadataOnlyMode()
+        return MetadataPromptTemplatePath
+
+    return FullPromptTemplatePath
+}
+
+ReadPromptTemplateFile(templatePath) {
+    return FileRead(templatePath, "UTF-8")
+}
+
+BuildPromptFromTemplate(template, pageUrl, productName, currentMetaTitle, currentMetaDescription, currentHtmlSnippet, requiredInternalLinks, imageNotes, additionalProductNotes) {
+    prompt := template
+    prompt := StrReplace(prompt, "{{PAGE_URL}}", CleanText(pageUrl))
+    prompt := StrReplace(prompt, "{{PRODUCT_NAME}}", CleanText(productName))
+    prompt := StrReplace(prompt, "{{CURRENT_META_TITLE}}", EmptyToNA(currentMetaTitle))
+    prompt := StrReplace(prompt, "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(currentMetaDescription))
+    prompt := StrReplace(prompt, "{{CURRENT_HTML_SNIPPET}}", CleanText(currentHtmlSnippet))
+    prompt := StrReplace(prompt, "{{REQUIRED_INTERNAL_LINKS}}", requiredInternalLinks)
+    prompt := StrReplace(prompt, "{{IMAGE_NOTES}}", imageNotes)
+    prompt := StrReplace(prompt, "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotes)
+
+    return prompt
 }
 
 ; ==========================================================
@@ -596,6 +665,7 @@ PasteCopiedChatGPTOutputToCms() {
 
     try {
         EnsureFolders()
+        ValidateSeoAutomationMode()
         ValidateImageTargetConfig()
 
         response := A_Clipboard
@@ -612,27 +682,18 @@ PasteCopiedChatGPTOutputToCms() {
             return
         }
 
-        productNameRecommendation := ExtractLabel(block, "PRODUCT_NAME_RECOMMENDATION:", "META_TITLE:")
-        metaTitle := ExtractLabel(block, "META_TITLE:", "META_DESCRIPTION:")
-        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", "HTML_SNIPPET:")
-        htmlSnippet := ExtractLabel(block, "HTML_SNIPPET:", "IMAGE_1_TITLE:")
-        imageTitles := []
-        imageAlts := []
-
-        Loop imageCountToProcess {
-            i := A_Index
-            nextImageTitleLabel := i < imageCountToProcess ? "IMAGE_" (i + 1) "_TITLE:" : ""
-
-            imageTitles.Push(ExtractLabel(block, "IMAGE_" i "_TITLE:", "IMAGE_" i "_ALT:"))
-            imageAlts.Push(ExtractLabel(block, "IMAGE_" i "_ALT:", nextImageTitleLabel))
-        }
-
-        htmlSnippet := StripCodeFence(htmlSnippet)
+        output := ParseAutomationOutput(block, imageCountToProcess, IsMetadataOnlyMode())
+        productNameRecommendation := output["productNameRecommendation"]
+        metaTitle := output["metaTitle"]
+        metaDescription := output["metaDescription"]
+        htmlSnippet := output["htmlSnippet"]
+        imageTitles := output["imageTitles"]
+        imageAlts := output["imageAlts"]
 
         LogText("chatgpt-output", response)
         LogText("automation-block", block)
 
-        warnings := ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts)
+        warnings := ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, IsFullMode())
 
         if warnings != "" {
             MsgBox "Warnings found. No fields were pasted.`n`n" warnings
@@ -643,24 +704,81 @@ PasteCopiedChatGPTOutputToCms() {
 
         ; Optional Overview tab: paste product name recommendation
         if useRecommendedProductName && IsUsableProductNameRecommendation(productNameRecommendation) {
-            ClickPoint("overview_tab", 600)
-            PasteToPoint("product_name", productNameRecommendation)
+            InsertProductNameRecommendation(productNameRecommendation)
         }
 
-        ; Description tab: paste meta and HTML fields
-        ClickPoint("description_tab", 600)
-        PasteToPoint("meta_title", metaTitle)
-        PasteToPoint("html_snippet", htmlSnippet)
-        PasteToPoint("meta_description", metaDescription)
+        ; Description tab: paste meta fields. Full mode also pastes the HTML/product description field.
+        InsertMetaFields(metaTitle, metaDescription, htmlSnippet)
 
         ; Images tab: open each image details page and paste image metadata
-        Loop imageCountToProcess {
-            PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index])
-        }
+        InsertImageSeoFields(imageTitles, imageAlts)
 
         Flash("SEO fields pasted.")
     } catch as err {
         MsgBox "PasteCopiedChatGPTOutputToCms failed:`n`n" err.Message
+    }
+}
+
+; ==========================================================
+; AUTOMATION OUTPUT PARSING
+; ==========================================================
+
+ParseAutomationOutput(block, imageCount, metadataOnly := false) {
+    productNameRecommendation := ExtractLabel(block, "PRODUCT_NAME_RECOMMENDATION:", "META_TITLE:")
+    metaTitle := ExtractLabel(block, "META_TITLE:", "META_DESCRIPTION:")
+
+    if metadataOnly {
+        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", "IMAGE_1_TITLE:")
+        htmlSnippet := ""
+    } else {
+        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", "HTML_SNIPPET:")
+        htmlSnippet := ExtractLabel(block, "HTML_SNIPPET:", "IMAGE_1_TITLE:")
+        htmlSnippet := StripCodeFence(htmlSnippet)
+    }
+
+    imageTitles := []
+    imageAlts := []
+
+    Loop imageCount {
+        i := A_Index
+        nextImageTitleLabel := i < imageCount ? "IMAGE_" (i + 1) "_TITLE:" : ""
+
+        imageTitles.Push(ExtractLabel(block, "IMAGE_" i "_TITLE:", "IMAGE_" i "_ALT:"))
+        imageAlts.Push(ExtractLabel(block, "IMAGE_" i "_ALT:", nextImageTitleLabel))
+    }
+
+    return Map(
+        "productNameRecommendation", productNameRecommendation,
+        "metaTitle", metaTitle,
+        "metaDescription", metaDescription,
+        "htmlSnippet", htmlSnippet,
+        "imageTitles", imageTitles,
+        "imageAlts", imageAlts
+    )
+}
+
+; ==========================================================
+; CMS INSERTION HELPERS
+; ==========================================================
+
+InsertProductNameRecommendation(productNameRecommendation) {
+    ClickPoint("overview_tab", 600)
+    PasteToPoint("product_name", productNameRecommendation)
+}
+
+InsertMetaFields(metaTitle, metaDescription, htmlSnippet := "") {
+    ClickPoint("description_tab", 600)
+    PasteToPoint("meta_title", metaTitle)
+
+    if IsFullMode()
+        PasteToPoint("html_snippet", htmlSnippet)
+
+    PasteToPoint("meta_description", metaDescription)
+}
+
+InsertImageSeoFields(imageTitles, imageAlts) {
+    Loop imageTitles.Length {
+        PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index])
     }
 }
 
@@ -685,7 +803,7 @@ PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt) {
 ; VALIDATION
 ; ==========================================================
 
-ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts) {
+ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, requireHtmlSnippet := true) {
     warnings := ""
 
     if CleanText(metaTitle) = ""
@@ -694,7 +812,7 @@ ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, im
     if CleanText(metaDescription) = ""
         warnings .= "Meta description is empty.`n"
 
-    if CleanText(htmlSnippet) = ""
+    if requireHtmlSnippet && CleanText(htmlSnippet) = ""
         warnings .= "HTML snippet is empty.`n"
 
     Loop imageTitles.Length {
@@ -711,14 +829,16 @@ ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, im
     if StrLen(metaDescription) > 170
         warnings .= "Meta description is over 170 characters.`n"
 
-    if !InStr(htmlSnippet, "<")
-        warnings .= "HTML snippet does not look like HTML.`n"
+    if requireHtmlSnippet {
+        if !InStr(htmlSnippet, "<")
+            warnings .= "HTML snippet does not look like HTML.`n"
 
-    if InStr(htmlSnippet, ":contentReference[") || InStr(htmlSnippet, "oaicite")
-        warnings .= "HTML may contain citation/source-token text.`n"
+        if InStr(htmlSnippet, ":contentReference[") || InStr(htmlSnippet, "oaicite")
+            warnings .= "HTML may contain citation/source-token text.`n"
 
-    if InStr(htmlSnippet, "{{") || InStr(htmlSnippet, "}}")
-        warnings .= "HTML may still contain placeholder text.`n"
+        if InStr(htmlSnippet, "{{") || InStr(htmlSnippet, "}}")
+            warnings .= "HTML may still contain placeholder text.`n"
+    }
 
     return warnings
 }
