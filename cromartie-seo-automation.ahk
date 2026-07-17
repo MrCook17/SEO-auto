@@ -44,7 +44,7 @@ chatgptWinTitle := "Arts & Crafts"
 ; "metadata" = metadata and image SEO
 ; "image" = image SEO for one ordinary product
 ; "matrix_image" = image SEO for every child of one matrix product
-SeoAutomationMode := "metadata"
+SeoAutomationMode := "matrix_image"
 
 FullPromptTemplatePath := A_ScriptDir "\prompt-template.md"
 MetadataPromptTemplatePath := A_ScriptDir "\prompt-template-metadata-only.md"
@@ -52,15 +52,22 @@ ImageOnlyPromptTemplatePath := A_ScriptDir "\prompt-template-image-only.md"
 MatrixImagePromptTemplatePath := A_ScriptDir "\prompt-template-matrix-image.md"
 
 ; Kept as a familiar reference for the existing full workflow.
-promptTemplatePath := MetadataPromptTemplatePath
+; promptTemplatePath := MetadataPromptTemplatePath
 logDir := A_ScriptDir "\logs"
 backupDir := A_ScriptDir "\backups"
 matrixStateFilePath := A_ScriptDir "\matrix-image-state.txt"
 matrixNavigationDelayMs := 4000
+matrixReturnDelayMs := 3000
+matrixFullyReopenParentAfterReturn := true
+matrixParentReopenDelayMs := 2500
 matrixPageWaitTimeoutMs := 12000
 matrixStableDurationMs := 1000
 matrixUiaSearchTimeoutMs := 7000
+matrixScrollWheelNotchesPerStep := 5
+matrixMaxScrollSteps := 30
+matrixNoNewRowsStopCount := 3
 global matrixState := 0
+global activeMatrixParentProductName := ""
 global LastEditButtons := []
 global LastDocument := 0
 
@@ -96,6 +103,7 @@ imageTargets := [
 copyHighQualityImagePreview := true
 highQualityImageCopyPoint := [635, 687] ; x: 635, y: 687
 highQualityImagePreviewLoadDelayMs := 700
+imageTabLoadDelayMs := 1500
 
 ; false = do not silently fall back to the old low-quality thumbnail copy if
 ; the high-quality preview copy fails. Set to true only if you prefer an
@@ -958,9 +966,10 @@ InsertImageSeoFields(imageTitles, imageAlts) {
 ; ==========================================================
 
 PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt) {
+    global imageTabLoadDelayMs
     target := GetImageTarget(imageIndex)
 
-    ClickPoint("images_tab", 700)
+    ClickPoint("images_tab", imageTabLoadDelayMs)
     ClickCoordinates(target["details_button"], 1000)
     PasteToPoint("image_title", imageTitle)
     PasteToPoint("image_alt", imageAlt)
@@ -1391,11 +1400,12 @@ NormaliseHarmlessWhitespace(value) {
 
 BuildMatrixImagePrompt(pageUrl) {
     global cmsWinTitle, imageCountToProcess, matrixState, MatrixImagePromptTemplatePath
-    global additionalProductNotesDefault
+    global additionalProductNotesDefault, activeMatrixParentProductName
     ValidateImageTargetConfig()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
     parentName := CopyFromPoint("product_name")
+    activeMatrixParentProductName := parentName
     ClickPoint("description_tab", 600)
     parentTitle := CopyOptionalFromPoint("meta_title")
     firstHtml := ""
@@ -1406,20 +1416,24 @@ BuildMatrixImagePrompt(pageUrl) {
     products := []
     Loop productCount {
         p := A_Index
-        controls := ReacquireMatrixSkuControls(productCount)
-        rowText := controls["buttons"][p].RowText
-        ClickMatrixEditButton(controls["buttons"][p])
-        WaitForChildProductPage(p, productCount)
-        ClickPoint("overview_tab", 500)
-        exactName := CopyFromPoint("product_name")
-        if p = 1 {
-            ClickPoint("description_tab", 600)
-            firstHtml := CopyOptionalFromPoint("html_snippet")
-        }
-        products.Push(Map("index", p, "productName", exactName, "variantContext", DeriveVariantContext(exactName, rowText), "skuRowText", rowText))
-        ClickPoint("matrix_child_cancel_button", 300)
-        WaitForMatrixSkuPage(p, productCount)
+        rowText := NormaliseMatrixRowText(initial["buttons"][p].RowText)
+        exactName := ExtractMatrixProductNameFromRow(rowText, p)
+        variantContext := ExtractMatrixVariantFromRow(rowText, exactName)
+        products.Push(Map("index", p, "productName", exactName, "variantContext", variantContext, "skuRowText", rowText))
     }
+
+    ; Restore the useful first-child HTML context. Only the first child needs
+    ; this extra text-collection visit; all names and variants remain sourced
+    ; from the matrix SKU accessibility rows.
+    ; Reuse the coordinate-only snapshot captured above. No UIA lookup occurs
+    ; after a child Cancel/Save transition during this stage.
+    controls := initial
+    ClickMatrixEditButton(controls["buttons"][1])
+    WaitForChildProductPage(1, productCount)
+    ClickPoint("description_tab", 600)
+    firstHtml := CopyOptionalFromPoint("html_snippet")
+    ClickPoint("matrix_child_cancel_button", 300)
+    WaitForMatrixSkuPage(1, productCount)
     matrixState := Map("parentProductName", parentName, "productCount", productCount, "imagesPerProduct", imageCountToProcess, "products", products)
     SaveMatrixState(matrixState)
     prompt := BuildMatrixPromptFromState(FileRead(MatrixImagePromptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, firstHtml, matrixState)
@@ -1429,7 +1443,6 @@ BuildMatrixImagePrompt(pageUrl) {
     Loop productCount {
         p := A_Index
         ActivateWindow(cmsWinTitle)
-        controls := ReacquireMatrixSkuControls(productCount)
         ToolTip "Matrix product " p " of " productCount "`nAttaching images"
         ClickMatrixEditButton(controls["buttons"][p])
         WaitForChildProductPage(p, productCount)
@@ -1438,8 +1451,6 @@ BuildMatrixImagePrompt(pageUrl) {
         ClickPoint("matrix_child_cancel_button", 300)
         WaitForMatrixSkuPage(p, productCount)
     }
-    ActivateWindow(cmsWinTitle)
-    ReacquireMatrixSkuControls(productCount)
     ActivateWindow(chatgptWinTitle)
     FocusChatGptInputForPaste()
     Flash("Matrix prompt and attachments are ready for manual review.", 3000)
@@ -1470,8 +1481,9 @@ DeriveVariantContext(productName, rowText) {
 }
 
 PasteMatrixImageOutputToCms() {
-    global cmsWinTitle, imageCountToProcess
+    global cmsWinTitle, imageCountToProcess, activeMatrixParentProductName
     state := LoadMatrixState()
+    activeMatrixParentProductName := state["parentProductName"]
     if state["imagesPerProduct"] != imageCountToProcess
         throw Error("Saved matrix state uses " state["imagesPerProduct"] " image(s), but imageCountToProcess is " imageCountToProcess ".")
     response := A_Clipboard
@@ -1481,11 +1493,13 @@ PasteMatrixImageOutputToCms() {
     output := ParseMatrixImageOutput(block, state)
     LogText("matrix_image-chatgpt-output", response)
     ActivateWindow(cmsWinTitle)
-    ReacquireMatrixSkuControls(state["productCount"])
+    ; Scan once at the start of the insertion stage. This validates the child
+    ; count and stores fresh screen coordinates, but no UIA lookup is performed
+    ; after any child Save transition.
+    controls := ReacquireMatrixSkuControls(state["productCount"])
     Loop state["productCount"] {
         p := A_Index
         try {
-            controls := ReacquireMatrixSkuControls(state["productCount"])
             ClickMatrixEditButton(controls["buttons"][p])
             WaitForChildProductPage(p, state["productCount"])
             ClickPoint("overview_tab", 400)
@@ -1577,29 +1591,40 @@ DecodeStateValue(value) {
 
 ReacquireMatrixSkuControls(expectedCount := 0) {
     global matrixUiaSearchTimeoutMs, matrixStableDurationMs, LastDocument, LastEditButtons
-    browser := UIA_Browser()
-    document := browser.GetCurrentDocumentElement()
-    LastDocument := document
-    scope := FindMatrixModalScope(document)
-    if !scope
-        throw Error("The 'Editing Matrix Product:' modal could not be found.")
-    RejectPotentiallyIncompleteMatrix(scope)
-    buttons := WaitForStableEditLocations(scope, matrixUiaSearchTimeoutMs, matrixStableDurationMs)
-    LastEditButtons := buttons
-    if buttons.Length = 0
-        throw Error("No matrix child Edit controls were detected. Press F9 for an accessibility-tree dump.")
-    if expectedCount && buttons.Length != expectedCount
-        throw Error("Matrix child count changed: expected " expectedCount ", detected " buttons.Length ".")
-    return Map("document", document, "scope", scope, "buttons", buttons)
+    ShowMatrixLookupStatus("Reading Chrome accessibility tree...")
+    try {
+        result := WaitForMatrixModalScope(matrixUiaSearchTimeoutMs)
+        document := result["document"]
+        scope := result["scope"]
+        LastDocument := document
+        if !scope
+            throw Error("No matrix SKU Edit controls with Name/StockCode row context became available within " matrixUiaSearchTimeoutMs " ms. Press F9 to dump the current accessibility tree.")
+        ShowMatrixLookupStatus("Collecting all SKU rows while scrolling...")
+        buttons := CollectAllMatrixSkuButtons(scope)
+        LastEditButtons := buttons
+        if buttons.Length = 0
+            throw Error("No matrix child Edit controls were detected. Press F9 for an accessibility-tree dump.")
+        if expectedCount && buttons.Length != expectedCount
+            throw Error("Matrix child count changed: expected " expectedCount ", detected " buttons.Length ".")
+        return Map("document", document, "scope", scope, "buttons", buttons)
+    } finally {
+        ToolTip()
+    }
 }
 
 FindMatrixModalScope(document) {
-    try titleElement := document.FindElement({Name: "Editing Matrix Product:", mm: 2, cs: 0})
+    try titleElement := document.FindElement({ Name: "Editing Matrix Product:", mm: 2, cs: 0 })
     catch
         return 0
+    try {
+        if titleElement.IsOffscreen
+            return 0
+    }
     scope := titleElement
     Loop 15 {
-        if GetUniqueVisibleEditLocations(scope).Length > 0
+        ; During loading Chrome can expose Edit elements before their screen
+        ; rectangles are stable, so modal discovery must not require visibility.
+        if ScopeContainsAnyEditElement(scope)
             return scope
         try parent := UIA.TreeWalkerTrue.GetParentElement(scope)
         catch
@@ -1611,8 +1636,21 @@ FindMatrixModalScope(document) {
     return 0
 }
 
+ScopeContainsAnyEditElement(scope) {
+    try elements := scope.FindElements({ Name: "Edit", mm: 2, cs: 0 })
+    catch
+        return false
+    for _, element in elements {
+        try {
+            if RegExMatch(element.Name, "i)(^|[^A-Za-z])Edit([^A-Za-z]|$)")
+                return true
+        }
+    }
+    return false
+}
+
 RejectPotentiallyIncompleteMatrix(scope) {
-    try elements := scope.FindElements({Name: "Edit", mm: 2, cs: 0})
+    try elements := scope.FindElements({ Name: "Edit", mm: 2, cs: 0 })
     catch
         return
     for _, element in elements {
@@ -1626,6 +1664,7 @@ RejectPotentiallyIncompleteMatrix(scope) {
 WaitForStableEditLocations(scope, timeoutMs, stableDurationMs) {
     deadline := A_TickCount + timeoutMs, best := [], prior := "", stableSince := 0
     Loop {
+        ShowMatrixLookupStatus("Scanning Edit buttons...`nBest count so far: " best.Length)
         current := GetUniqueVisibleEditLocations(scope)
         if current.Length > best.Length
             best := current
@@ -1645,8 +1684,8 @@ WaitForStableEditLocations(scope, timeoutMs, stableDurationMs) {
 }
 
 GetUniqueVisibleEditLocations(scope) {
-    raw := [], unique := []
-    try elements := scope.FindElements({Name: "Edit", mm: 2, cs: 0})
+    candidates := [], unique := [], hasExactEditNames := false, hasSkuRows := false
+    try elements := scope.FindElements({ Name: "Edit", mm: 2, cs: 0 })
     catch
         return unique
     for _, element in elements {
@@ -1656,19 +1695,42 @@ GetUniqueVisibleEditLocations(scope) {
             rect := element.Location
             if rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.y < 0
                 continue
-            item := {Element: element, Name: element.Name, X: Round(rect.x), Y: Round(rect.y), W: Round(rect.w), H: Round(rect.h), CentreX: Round(rect.x + rect.w / 2), CentreY: Round(rect.y + rect.h / 2), RowText: GetEditRowContext(element)}
-            duplicate := 0
-            for index, saved in unique {
-                if LocationsRepresentSameControl(item, saved) {
-                    duplicate := index
-                    break
-                }
-            }
-            if !duplicate
-                unique.Push(item)
-            else if item.W * item.H > unique[duplicate].W * unique[duplicate].H
-                unique[duplicate] := item
+            ; Retain only screen geometry and row text. UIA element references
+            ; can become stale immediately after Chrome starts navigating.
+            exactEditName := StrLower(Trim(element.Name)) = "edit"
+            if exactEditName
+                hasExactEditNames := true
+            rowText := GetEditRowContext(element)
+            isSkuRow := RegExMatch(rowText, "i)\bName\b") && RegExMatch(rowText, "i)\bStock\s*Code\b|\bStockCode\b")
+            if isSkuRow
+                hasSkuRows := true
+            item := { Name: element.Name, ExactEditName: exactEditName, IsSkuRow: isSkuRow, ControlType: GetUiaControlTypeText(element), X: Round(rect.x), Y: Round(rect.y), W: Round(rect.w), H: Round(rect.h), CentreX: Round(rect.x + rect.w / 2), CentreY: Round(rect.y + rect.h / 2), RowText: rowText }
+            candidates.Push(item)
         }
+    }
+
+    ; Chrome often exposes both the visible Edit control and a larger parent
+    ; whose accessible name merely contains "Edit". When exact-name elements
+    ; exist, ignore the broad named containers: their rectangle centres can be
+    ; well outside the visible green button.
+    for _, item in candidates {
+        if hasSkuRows && !item.IsSkuRow
+            continue
+        if hasExactEditNames && !item.ExactEditName
+            continue
+        duplicate := 0
+        for index, saved in unique {
+            if LocationsRepresentSameControl(item, saved) {
+                duplicate := index
+                break
+            }
+        }
+        if !duplicate
+            unique.Push(item)
+        ; For overlapping exact Edit elements, the smaller rectangle is
+        ; normally the visible text/control and has the safest click centre.
+        else if IsBetterEditLocation(item, unique[duplicate])
+            unique[duplicate] := item
     }
     SortLocationsTopToBottom(unique)
     return unique
@@ -1676,7 +1738,7 @@ GetUniqueVisibleEditLocations(scope) {
 
 GetEditRowContext(element) {
     node := element, best := ""
-    Loop 5 {
+    Loop 8 {
         try node := UIA.TreeWalkerTrue.GetParentElement(node)
         catch
             break
@@ -1685,14 +1747,219 @@ GetEditRowContext(element) {
         try name := Trim(node.Name)
         catch
             continue
-        if name != "" && !InStr(name, "Editing Matrix Product:") && !RegExMatch(name, "i)^Edit$")
-            best := name
+        if name = "" || InStr(name, "Editing Matrix Product:") || RegExMatch(name, "i)^Edit$")
+            continue
+        cleanedName := RegExReplace(name, "[\r\n\t]+", " ")
+        ; The nearest ancestor containing the row's Name and StockCode is the
+        ; SKU record. Return it immediately instead of continuing upwards into
+        ; the whole SKU table or matrix modal.
+        if RegExMatch(cleanedName, "i)\bName\b") && RegExMatch(cleanedName, "i)\bStock\s*Code\b|\bStockCode\b")
+            return cleanedName
+        if best = ""
+            best := cleanedName
     }
-    return RegExReplace(best, "[\r\n\t]+", " ")
+    return best
+}
+
+CollectAllMatrixSkuButtons(scope) {
+    global matrixUiaSearchTimeoutMs, matrixStableDurationMs
+    global matrixMaxScrollSteps, matrixNoNewRowsStopCount
+
+    firstView := WaitForStableEditLocations(scope, matrixUiaSearchTimeoutMs, matrixStableDurationMs)
+    if firstView.Length = 0
+        return []
+
+    anchorX := firstView[1].CentreX
+    anchorY := firstView[1].CentreY
+
+    ; Small matrices expose every SKU at once and have no internal scrollbar.
+    ; Sending wheel input there can scroll the surrounding page or move the
+    ; pointer away from the modal, so return the visible set without scrolling.
+    if !MatrixScopeHasOffscreenSkuEdits(scope) {
+        for _, item in firstView {
+            key := GetMatrixSkuRowKey(item.RowText)
+            if key = ""
+                throw Error("A visible matrix SKU row has no usable StockCode or product-name identity.")
+            item.RowKey := key
+            item.RequiresScroll := false
+            item.ScrollSteps := 0
+            item.ScrollAnchorX := anchorX
+            item.ScrollAnchorY := anchorY
+        }
+        return firstView
+    }
+
+    ScrollMatrixSkuListToTop(anchorX, anchorY)
+
+    collected := [], seen := Map(), noNewCount := 0
+    Loop matrixMaxScrollSteps + 1 {
+        scrollStep := A_Index - 1
+        ShowMatrixLookupStatus("Scanning matrix SKU list...`nProducts found: " collected.Length "`nScroll step: " scrollStep)
+        current := WaitForStableEditLocations(scope, matrixUiaSearchTimeoutMs, 350)
+        newCount := 0
+        for _, item in current {
+            key := GetMatrixSkuRowKey(item.RowText)
+            if key = "" || seen.Has(key)
+                continue
+            item.RowKey := key
+            item.RequiresScroll := true
+            item.ScrollSteps := scrollStep
+            item.ScrollAnchorX := anchorX
+            item.ScrollAnchorY := anchorY
+            seen[key] := true
+            collected.Push(item)
+            newCount += 1
+        }
+
+        if newCount = 0
+            noNewCount += 1
+        else
+            noNewCount := 0
+
+        if noNewCount >= matrixNoNewRowsStopCount
+            break
+
+        ScrollMatrixSkuListDownOneStep(anchorX, anchorY)
+    }
+
+    ScrollMatrixSkuListToTop(anchorX, anchorY)
+    return collected
+}
+
+MatrixScopeHasOffscreenSkuEdits(scope) {
+    try elements := scope.FindElements({ Name: "Edit", mm: 2, cs: 0 })
+    catch
+        return false
+    for _, element in elements {
+        try {
+            if !element.IsOffscreen
+                continue
+            rowText := NormaliseMatrixRowText(GetEditRowContext(element))
+            if RegExMatch(rowText, "i)\bName\b") && RegExMatch(rowText, "i)\bStock\s*Code\b|\bStockCode\b")
+                return true
+        }
+    }
+    return false
+}
+
+GetMatrixSkuRowKey(rowText) {
+    text := NormaliseMatrixRowText(rowText)
+    if RegExMatch(text, "i)\bStock\s*Code\s*:\s*([^ ]+)", &match)
+        return "stock:" StrLower(match[1])
+    if RegExMatch(text, "i)\bName\s*:?\s*(.+?)(?=\s+Stock\s*Code|\s+StockCode|$)", &match)
+        return "name:" NormaliseHarmlessWhitespace(match[1])
+    return ""
+}
+
+ScrollMatrixSkuListToTop(anchorX, anchorY) {
+    MouseMove anchorX, anchorY, 0
+    ; A large bounded wheel-up sequence reliably resets the internal SKU pane
+    ; without depending on a fixed scrollbar coordinate.
+    SendNativeMouseWheel(1, 60)
+    Sleep 700
+}
+
+ScrollMatrixSkuListDownOneStep(anchorX, anchorY) {
+    global matrixScrollWheelNotchesPerStep
+    MouseMove anchorX, anchorY, 0
+    SendNativeMouseWheel(-1, matrixScrollWheelNotchesPerStep)
+    Sleep 650
+}
+
+SendNativeMouseWheel(direction, notchCount) {
+    ; mouse_event produces actual wheel input instead of a keyboard-style Send.
+    ; This avoids the Windows alert sound seen with large {WheelUp/Down} sends.
+    wheelDelta := direction > 0 ? 120 : -120
+    Loop notchCount {
+        DllCall("user32\mouse_event", "UInt", 0x0800, "UInt", 0, "UInt", 0, "Int", wheelDelta, "UPtr", 0)
+        Sleep 12
+    }
+}
+
+FindCurrentMatrixSkuButton(item) {
+    global matrixMaxScrollSteps
+    anchorX := item.ScrollAnchorX, anchorY := item.ScrollAnchorY
+    targetKey := item.RowKey
+
+    if item.HasOwnProp("RequiresScroll") && !item.RequiresScroll {
+        document := UIA_Browser().GetCurrentDocumentElement()
+        scope := FindMatrixModalScope(document)
+        if !scope && HasVisibleMatrixSkuRows(document)
+            scope := document
+        if scope {
+            for _, candidate in GetUniqueVisibleEditLocations(scope) {
+                if GetMatrixSkuRowKey(candidate.RowText) = targetKey
+                    return candidate
+            }
+        }
+        throw Error("Visible matrix SKU '" targetKey "' could not be located without scrolling.")
+    }
+
+    ScrollMatrixSkuListToTop(anchorX, anchorY)
+
+    Loop matrixMaxScrollSteps + 1 {
+        ShowMatrixLookupStatus("Locating " targetKey "...`nScroll step: " (A_Index - 1))
+        try {
+            document := UIA_Browser().GetCurrentDocumentElement()
+            scope := FindMatrixModalScope(document)
+            if !scope && HasVisibleMatrixSkuRows(document)
+                scope := document
+            if scope {
+                visibleButtons := GetUniqueVisibleEditLocations(scope)
+                for _, candidate in visibleButtons {
+                    if GetMatrixSkuRowKey(candidate.RowText) = targetKey {
+                        ToolTip()
+                        return candidate
+                    }
+                }
+            }
+        }
+        if A_Index <= matrixMaxScrollSteps
+            ScrollMatrixSkuListDownOneStep(anchorX, anchorY)
+    }
+    ToolTip()
+    throw Error("Could not bring matrix SKU '" targetKey "' into view for clicking.")
+}
+
+WaitForMatrixModalScope(timeoutMs) {
+    deadline := A_TickCount + timeoutMs
+    Loop {
+        ShowMatrixLookupStatus("Waiting for the matrix SKU accessibility tree...")
+        try {
+            document := UIA_Browser().GetCurrentDocumentElement()
+            scope := FindMatrixModalScope(document)
+            if scope
+                return Map("document", document, "scope", scope, "headingFound", true)
+            ; Chrome does not always expose the modal heading. A visible Edit
+            ; control whose nearest row contains both Name and StockCode is a
+            ; stronger SKU-specific fallback than searching generic page text.
+            if HasVisibleMatrixSkuRows(document)
+                return Map("document", document, "scope", document, "headingFound", false)
+        }
+        if A_TickCount >= deadline
+            return Map("document", 0, "scope", 0, "headingFound", false)
+        Sleep 250
+    }
+}
+
+HasVisibleMatrixSkuRows(scope) {
+    try elements := scope.FindElements({ Name: "Edit", mm: 2, cs: 0 })
+    catch
+        return false
+    for _, element in elements {
+        try {
+            if element.IsOffscreen
+                continue
+            rowText := NormaliseMatrixRowText(GetEditRowContext(element))
+            if RegExMatch(rowText, "i)\bName\b") && RegExMatch(rowText, "i)\bStock\s*Code\b|\bStockCode\b")
+                return true
+        }
+    }
+    return false
 }
 
 LocationsRepresentSameControl(a, b) {
-    return (Abs(a.CentreX-b.CentreX)<=18 && Abs(a.CentreY-b.CentreY)<=18) || (a.CentreX>=b.X && a.CentreX<=b.X+b.W && a.CentreY>=b.Y && a.CentreY<=b.Y+b.H) || (b.CentreX>=a.X && b.CentreX<=a.X+a.W && b.CentreY>=a.Y && b.CentreY<=a.Y+a.H)
+    return (Abs(a.CentreX - b.CentreX) <= 18 && Abs(a.CentreY - b.CentreY) <= 18) || (a.CentreX >= b.X && a.CentreX <= b.X + b.W && a.CentreY >= b.Y && a.CentreY <= b.Y + b.H) || (b.CentreX >= a.X && b.CentreX <= a.X + a.W && b.CentreY >= a.Y && b.CentreY <= a.Y + a.H)
 }
 
 SortLocationsTopToBottom(items) {
@@ -1701,9 +1968,9 @@ SortLocationsTopToBottom(items) {
     Loop items.Length - 1 {
         swapped := false
         Loop items.Length - A_Index {
-            i := A_Index, a := items[i], b := items[i+1]
-            if a.CentreY > b.CentreY || (Abs(a.CentreY-b.CentreY)<=5 && a.CentreX>b.CentreX) {
-                items[i] := b, items[i+1] := a, swapped := true
+            i := A_Index, a := items[i], b := items[i + 1]
+            if a.CentreY > b.CentreY || (Abs(a.CentreY - b.CentreY) <= 5 && a.CentreX > b.CentreX) {
+                items[i] := b, items[i + 1] := a, swapped := true
             }
         }
         if !swapped
@@ -1719,13 +1986,70 @@ BuildLocationSignature(items) {
 }
 
 ClickMatrixEditButton(item) {
-    clicked := false
-    try {
-        item.Element.Click()
-        clicked := true
+    ; Scroll until the saved StockCode/name identity is visible, then use its
+    ; current UIA rectangle. Never reuse a Y coordinate captured in a different
+    ; scroll position.
+    ToolTip()
+    CoordMode "Mouse", "Screen"
+    currentItem := item.HasOwnProp("RowKey") ? FindCurrentMatrixSkuButton(item) : item
+    MouseMove currentItem.CentreX, currentItem.CentreY, 0
+    Sleep 150
+    Click currentItem.CentreX, currentItem.CentreY
+    Sleep 300
+}
+
+ExtractMatrixProductNameFromRow(rowText, productIndex) {
+    text := NormaliseMatrixRowText(rowText)
+    if RegExMatch(text, "i)\bName\s*:?\s*(.+?)(?=\s+Stock\s*Code\s*:|\s+StockCode\s*:|\s+Edit\b|\s+Remove\b|$)", &match) {
+        name := Trim(match[1])
+        if name != ""
+            return name
     }
-    if !clicked
-        Click item.CentreX, item.CentreY
+    throw Error("Could not extract the exact product name from accessibility row " productIndex ".`n`nRow text: " rowText "`n`nPress F8 to inspect the detected rows.")
+}
+
+ExtractMatrixVariantFromRow(rowText, productName) {
+    text := NormaliseMatrixRowText(rowText)
+    if RegExMatch(text, "i)^(.+?)(?=\s+Name\s*:)", &match) {
+        variant := Trim(RegExReplace(match[1], "i)^(Size|Colour|Color|Variant)\s*:?\s*", ""))
+        if variant != ""
+            return variant
+    }
+    ; Many GO b2b rows expose the size only inside the product name, for
+    ; example: OG Square - 11" (11x11x.75 inch).
+    if RegExMatch(productName, "-\s*(.+?)(?=\s*\()", &nameMatch) {
+        variant := Trim(nameMatch[1])
+        ; Ignore an occasional stray accessibility digit after a quoted size.
+        variant := RegExReplace(variant, "^(.+?[\x22'])\s+\d+$", "$1")
+        if variant != ""
+            return variant
+    }
+    return "Not separately available; see product name"
+}
+
+NormaliseMatrixRowText(rowText) {
+    ; Remove Chrome's private-use icon glyphs and trailing button labels while
+    ; preserving the product name, size and stock code text.
+    text := RegExReplace(rowText, "[\x{E000}-\x{F8FF}]", " ")
+    text := RegExReplace(text, "i)\s+Edit\s+Remove\s*$", "")
+    return RegExReplace(Trim(text), "[\r\n\t ]+", " ")
+}
+
+IsBetterEditLocation(candidate, saved) {
+    if candidate.ExactEditName != saved.ExactEditName
+        return candidate.ExactEditName
+    return candidate.W * candidate.H < saved.W * saved.H
+}
+
+GetUiaControlTypeText(element) {
+    try return element.LocalizedControlType
+    catch
+        return "unknown"
+}
+
+ShowMatrixLookupStatus(message) {
+    MouseGetPos &mouseX, &mouseY
+    ToolTip message, mouseX + 22, mouseY + 22
 }
 
 WaitForChildProductPage(productIndex, productCount) {
@@ -1733,38 +2057,144 @@ WaitForChildProductPage(productIndex, productCount) {
     Sleep matrixNavigationDelayMs
     deadline := A_TickCount + matrixPageWaitTimeoutMs
     Loop {
+        ShowMatrixLookupStatus("Waiting for child product " productIndex " of " productCount " to open...`nChecking the accessibility tree.")
         try {
             document := UIA_Browser().GetCurrentDocumentElement()
             if !FindMatrixModalScope(document) {
+                ToolTip()
                 Sleep 400
                 return true
             }
         }
-        if A_TickCount >= deadline
+        if A_TickCount >= deadline {
+            ToolTip()
             throw Error("Child page did not become ready for product " productIndex " of " productCount ".")
+        }
         Sleep 300
     }
 }
 
 WaitForMatrixSkuPage(productIndex, expectedCount) {
-    global matrixPageWaitTimeoutMs, matrixNavigationDelayMs
-    Sleep matrixNavigationDelayMs
-    deadline := A_TickCount + matrixPageWaitTimeoutMs
+    global matrixReturnDelayMs, matrixFullyReopenParentAfterReturn
+    ; Cancel/Save has already been clicked. Do not interrogate the
+    ; accessibility tree during this transition; allow GO b2b three seconds
+    ; to restore the matrix SKU page, then continue.
+    ToolTip "Waiting for the matrix SKU page to load..."
+    Sleep matrixReturnDelayMs
+
+    if matrixFullyReopenParentAfterReturn
+        FullyReopenActiveMatrixParent()
+    ToolTip()
+    return true
+}
+
+FullyReopenActiveMatrixParent() {
+    global activeMatrixParentProductName, matrixParentReopenDelayMs
+    if Trim(activeMatrixParentProductName) = ""
+        throw Error("The active matrix parent name is unavailable, so the parent cannot be reopened safely.")
+
+    ; Close/save the entire matrix parent to return to the catalogue list.
+    ToolTip "Closing the matrix parent to rebuild GO b2b..."
+    ClickPoint("product_save_button", matrixParentReopenDelayMs)
+
+    ; Locate the exact matrix parent row on the catalogue page and click its
+    ; live Edit-button centre. This avoids a fixed row coordinate.
+    ToolTip "Finding matrix parent:`n" activeMatrixParentProductName
+    editButton := WaitForCatalogueProductEditButton(activeMatrixParentProductName, 10000)
+    if !editButton
+        throw Error("Could not find the catalogue Edit button for matrix parent '" activeMatrixParentProductName "'.")
+    MouseMove editButton.CentreX, editButton.CentreY, 0
+    Sleep 150
+    Click editButton.CentreX, editButton.CentreY
+    Sleep matrixParentReopenDelayMs
+
+    ToolTip "Opening the refreshed SKUs tab..."
+    ClickPoint("matrix_skus_tab", 1500)
+}
+
+WaitForCatalogueProductEditButton(productName, timeoutMs) {
+    deadline := A_TickCount + timeoutMs
     Loop {
         try {
-            ReacquireMatrixSkuControls(expectedCount)
-            return true
+            document := UIA_Browser().GetCurrentDocumentElement()
+            button := FindCatalogueProductEditButton(document, productName)
+            if button
+                return button
         }
         if A_TickCount >= deadline
-            throw Error("Save/Cancel did not return to the matrix SKU page after product " productIndex ".")
-        Sleep 350
+            return 0
+        Sleep 300
     }
+}
+
+FindCatalogueProductEditButton(document, productName) {
+    targetName := NormaliseCatalogueProductName(productName)
+    words := StrSplit(targetName, " "), searchAnchor := ""
+    Loop Min(3, words.Length)
+        searchAnchor .= (A_Index > 1 ? " " : "") words[A_Index]
+    ; Search with a short stable anchor, then enforce the complete normalised
+    ; parent name below. This tolerates NBSPs and repeated spaces in Chrome.
+    try productElements := document.FindElements({ Name: searchAnchor, mm: 2, cs: 0 })
+    catch
+        return 0
+
+    productRows := []
+    for _, productElement in productElements {
+        try {
+            if productElement.IsOffscreen
+                continue
+            exposedName := NormaliseCatalogueProductName(productElement.Name)
+            if !InStr(exposedName, targetName)
+                continue
+            rect := productElement.Location
+            if rect.w > 0 && rect.h > 0
+                productRows.Push({ CentreY: rect.y + rect.h / 2, Name: productElement.Name })
+        }
+    }
+
+    if productRows.Length = 0
+        return 0
+
+    try editElements := document.FindElements({ Name: "Edit", mm: 2, cs: 0 })
+    catch
+        return 0
+
+    best := 0, bestDistance := 999999
+    for _, editElement in editElements {
+        try {
+            if editElement.IsOffscreen || StrLower(Trim(editElement.Name)) != "edit"
+                continue
+            rect := editElement.Location
+            if rect.w <= 0 || rect.h <= 0
+                continue
+            editCentreY := rect.y + rect.h / 2
+            for _, productRow in productRows {
+                distance := Abs(editCentreY - productRow.CentreY)
+                if distance < bestDistance {
+                    bestDistance := distance
+                    best := { CentreX: Round(rect.x + rect.w / 2), CentreY: Round(editCentreY) }
+                }
+            }
+        }
+    }
+
+    ; Adjacent catalogue rows are roughly 53 pixels apart. This tolerance
+    ; accepts the target row while rejecting the Edit buttons above and below.
+    return best && bestDistance <= 35 ? best : 0
+}
+
+NormaliseCatalogueProductName(value) {
+    value := StrReplace(value, Chr(160), " ")
+    value := StrReplace(value, "–", "-")
+    value := StrReplace(value, "—", "-")
+    value := RegExReplace(Trim(value), "\s+", " ")
+    return StrLower(value)
 }
 
 BuildLocationsMessage(items) {
     output := ""
     for index, item in items
-        output .= index ". " item.Name " | centre=" item.CentreX "," item.CentreY " | row=" item.RowText "`n"
+        output .= index ". " item.Name " | type=" item.ControlType " | rect=" item.X "," item.Y " " item.W "x" item.H " | centre=" item.CentreX "," item.CentreY " | row=" item.RowText "`n"
     return output = "" ? "No Edit controls recorded." : output
 }
 
@@ -1784,5 +2214,14 @@ DumpAccessibilityTree() {
         MsgBox "Accessibility tree saved to:`n" path
     } catch as err {
         MsgBox "Accessibility-tree dump failed:`n`n" err.Message
+    }
+}
+
+IsMatrixModalPresent(document) {
+    try {
+        heading := document.FindElement({ Name: "Editing Matrix Product:", mm: 2, cs: 0 })
+        return !!heading
+    } catch {
+        return false
     }
 }

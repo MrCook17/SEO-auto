@@ -1,0 +1,7 @@
+﻿CROMARTIE_MATRIX_STATE_V1
+parent	GR Pottery Forms - Wallie Christmas Tree Drape Mould
+count	3
+images	1
+product	1	Wallie Christmas Tree - 4x5" ( 4x5x1 inch )	4x5"	Name Wallie Christmas Tree - 4x5" ( 4x5x1 inch ) StockCode: GRWCT4
+product	2	Wallie Christmas Tree - 6x7.5" ( 6x7.5x1 inch )	6x7.5"	Name Wallie Christmas Tree - 6x7.5" ( 6x7.5x1 inch ) StockCode: GRWCT6
+product	3	Wallie Christmas Tree - 8x10" ( 8x10x1 inch )	8x10"	Name Wallie Christmas Tree - 8x10" ( 8x10x1 inch ) StockCode: GRWCT8
