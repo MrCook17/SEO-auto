@@ -32,7 +32,9 @@ CoordMode "Mouse", "Screen"
 
 cmsWinTitle := "GOb2b Admin - Cromartie Hobbycraft Limited - Catalogue Manager - Google Chrome"
 ; chatgptWinTitle := "Colour & Glaze - SEO Metadata Creation - Google Chrome"
-chatgptWinTitle := "Colour & Glaze - Product SEO Metadata Setup - Google Chrome"
+; chatgptWinTitle := "Colour & Glaze - Product SEO Metadata Setup - Google Chrome"
+; chatgptWinTitle := "Colour & Glaze"
+chatgptWinTitle := "Arts & Crafts"
 
 ; Available modes:
 ; "full" = current existing workflow
@@ -43,13 +45,13 @@ FullPromptTemplatePath := A_ScriptDir "\prompt-template.md"
 MetadataPromptTemplatePath := A_ScriptDir "\prompt-template-metadata-only.md"
 
 ; Kept as a familiar reference for the existing full workflow.
-promptTemplatePath := FullPromptTemplatePath
+promptTemplatePath := MetadataPromptTemplatePath
 logDir := A_ScriptDir "\logs"
 backupDir := A_ScriptDir "\backups"
 
 ; Temporary hardcoded public product/category URL for {PAGE_URL} in the ChatGPT prompt.
 ; This avoids using the GO B2B CMS edit URL.
-hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Non-Fired-Colour/Crafters-Choice-Acrylic-Paints-59ml/Crafters-Choice-Fluorescent-Acrylic-Paints/..."
+hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/New-Products/GR-Pottery-Forms-Clay-Tools-and-Formers/..."
 
 ; Try to copy/paste the product image into ChatGPT after the prompt is pasted.
 ; The script still stops before sending so you can confirm the image attached correctly.
@@ -66,7 +68,9 @@ imageCountToProcess := 1
 ; - details_button: the button that opens the image tags/details screen
 imageTargets := [
     Map("image", [399, 454], "details_button", [319, 555]),
-    Map("image", [645, 451], "details_button", [571, 552])
+    Map("image", [645, 451], "details_button", [571, 552]),
+    Map("image", [896, 460], "details_button", [820, 554]), ; x: 896, y: 460 x: 820, y: 554
+    Map("image", [1160, 459], "details_button", [1074, 551]) ; x: 1160, y: 459 x: 1074, y: 551
 ]
 
 ; High-quality image copy settings.
@@ -75,7 +79,7 @@ imageTargets := [
 ; 2. Copy the larger/high-quality preview image from this point.
 ; Keep this enabled so ChatGPT receives the clearer image rather than the small thumbnail.
 copyHighQualityImagePreview := true
-highQualityImageCopyPoint := [334, 650]
+highQualityImageCopyPoint := [635, 687] ; x: 635, y: 687
 highQualityImagePreviewLoadDelayMs := 700
 
 ; false = do not silently fall back to the old low-quality thumbnail copy if
@@ -125,7 +129,6 @@ coords := Map(
 )
 
 requiredInternalLinksDefault := "N/A"
-imageNotesDefault := "Attached images. Number of product images: " imageCountToProcess "."
 additionalProductNotesDefault := "N/A"
 
 ; ==========================================================
@@ -135,11 +138,21 @@ additionalProductNotesDefault := "N/A"
 ^!t:: TestScript()
 ^!w:: CopyActiveWindowTitle()
 ^!c:: CaptureMouseCoords()
-^!p:: OpenProductBuildPromptAndPasteToChatGPT()
+; ^!p:: OpenProductBuildPromptAndPasteToChatGPT()
+NumpadEnter:: OpenProductBuildPromptAndPasteToChatGPT()
 ; ^!b:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!i:: TryCopyCmsImagesToChatGPT()
 ^!n:: ToggleRecommendedProductName()
+^1:: SetImageCountToProcess(1)
+^2:: SetImageCountToProcess(2)
+^3:: SetImageCountToProcess(3)
+^4:: SetImageCountToProcess(4)
+^5:: SetImageCountToProcess(5)
+^6:: SetImageCountToProcess(6)
+^7:: SetImageCountToProcess(7)
+^8:: SetImageCountToProcess(8)
+^9:: SetImageCountToProcess(9)
 ; ^!o:: PasteCopiedChatGPTOutputToCms()
 Numpad6:: PasteCopiedChatGPTOutputToCms()
 ^!r:: Reload()
@@ -154,9 +167,9 @@ Esc:: ExitApp()
 ; ==========================================================
 
 TestScript() {
-    global useRecommendedProductName, SeoAutomationMode
+    global useRecommendedProductName, SeoAutomationMode, imageCountToProcess
     nameMode := useRecommendedProductName ? "ON" : "OFF"
-    Flash("Script running. SEO mode: " SeoAutomationMode ". Product name recommendation: " nameMode)
+    Flash("Script running. SEO mode: " SeoAutomationMode ". Images: " imageCountToProcess ". Product name recommendation: " nameMode)
 }
 
 CopyActiveWindowTitle() {
@@ -170,6 +183,29 @@ ToggleRecommendedProductName() {
     useRecommendedProductName := !useRecommendedProductName
     mode := useRecommendedProductName ? "ON" : "OFF"
     Flash("Product name recommendation paste: " mode)
+}
+
+SetImageCountToProcess(imageCount) {
+    global imageCountToProcess, imageTargets
+
+    if imageCount < 1 {
+        Flash("Image count must be at least 1.")
+        return false
+    }
+
+    if imageCount > imageTargets.Length {
+        MsgBox "Cannot set image count to " imageCount ".`n`nOnly " imageTargets.Length " image coordinate entries are configured in imageTargets."
+        return false
+    }
+
+    imageCountToProcess := imageCount
+    Flash("Prompt/CMS image count set to " imageCount ".")
+    return true
+}
+
+GetDefaultImageNotes() {
+    global imageCountToProcess
+    return "Attached images. Number of product images: " imageCountToProcess "."
 }
 
 CaptureMouseCoords() {
@@ -227,7 +263,7 @@ BuildPromptFromOpenProductPageAndPasteToChatGPT() {
 
 BuildPromptFromCurrentProductPage(pageUrl) {
     global cmsWinTitle, chatgptWinTitle, SeoAutomationMode
-    global requiredInternalLinksDefault, imageNotesDefault, additionalProductNotesDefault
+    global requiredInternalLinksDefault, additionalProductNotesDefault
     global attemptImageCopyAfterPrompt, imageCountToProcess
 
     ValidateSeoAutomationMode()
@@ -262,6 +298,7 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     }
 
     template := ReadPromptTemplateFile(templatePath)
+    imageNotes := GetDefaultImageNotes()
 
     prompt := BuildPromptFromTemplate(
         template,
@@ -271,7 +308,7 @@ BuildPromptFromCurrentProductPage(pageUrl) {
         currentMetaDescription,
         currentHtmlSnippet,
         requiredInternalLinksDefault,
-        imageNotesDefault,
+        imageNotes,
         additionalProductNotesDefault
     )
     prompt := EnsurePromptSupportsImageCount(prompt, imageCountToProcess)

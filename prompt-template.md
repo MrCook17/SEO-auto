@@ -5,7 +5,7 @@ Use:
 - `cromartie_colour_glaze_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_colour_glaze_product_page_seo_strategy_workbook_aligned.md`
 - `cromartie_flexible_cms_styling_guidance_updated.md`
-- `cromartie_colour_glaze_product_page_recurring_fixes_v1.md`
+- `cromartie_colour_glaze_product_page_recurring_fixes_v13.md`
 
 Important styling instruction:
 You must use `cromartie_flexible_cms_styling_guidance_updated.md` as the HTML styling source of truth.
@@ -33,18 +33,20 @@ Current HTML/product description snippet:
 ```
 
 Required internal links:
-No-Fire Snows (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Non-Fired-Colour/No-Fire-Snows-for-Bisque) and Acrylic Sealers & Varnishes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Non-Fired-Colour/Acrylic-Sealers-for-Pottery-and-Bisque)
+Crackle Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Crackle-Glazes) and Raku Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Raku-Glazes)
 
 Image notes:
 {{IMAGE_NOTES}}
 
 Additional product notes:
-Effect: raised textured snow finish
-Format: ready-to-use no-fire snow paint
-Use: ceramics, bisque, glazed pottery, wood, plastic, glass, baskets and wreaths
-Application: brush, dab or spread onto the surface
-Firing: no kiln required
-Finish: non-toxic and self-sealing
+Glaze type: earthenware crackle glaze for pottery and ceramics
+Jar size: 250ml
+Recommended firing temperature: 1020°C–1100°C
+Cone range: Cone 05–03
+Recipe note: no clay is contained in the glaze recipe
+Application benefit: brushing medium supports adhesion, shelf life and reduced settling
+
+Crackle glaze results can vary depending on glaze thickness, clay body and firing process. Colour images should be used as a guide only, as colour reproduction and kiln conditions can both affect the final fired result.
 
 Task:
 Create:
