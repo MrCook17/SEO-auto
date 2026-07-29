@@ -5,7 +5,7 @@ Use:
 - `cromartie_colour_glaze_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_colour_glaze_product_page_seo_strategy_workbook_aligned.md`
 - `cromartie_flexible_cms_styling_guidance_updated.md`
-- `cromartie_colour_glaze_product_page_recurring_fixes_v13.md`
+- `cromartie_colour_glaze_product_page_recurring_fixes_v15.md`
 
 Important styling instruction:
 You must use `cromartie_flexible_cms_styling_guidance_updated.md` as the HTML styling source of truth.
@@ -33,20 +33,19 @@ Current HTML/product description snippet:
 ```
 
 Required internal links:
-Crackle Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Crackle-Glazes) and Raku Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Raku-Glazes)
+C6 Pro Series Stoneware Glazes (Liquid) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes) and C6 Pro Series Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes) and any other inlinks that may exist which are relevant
 
 Image notes:
 {{IMAGE_NOTES}}
 
 Additional product notes:
-Glaze type: earthenware crackle glaze for pottery and ceramics
-Jar size: 250ml
-Recommended firing temperature: 1020°C–1100°C
-Cone range: Cone 05–03
-Recipe note: no clay is contained in the glaze recipe
-Application benefit: brushing medium supports adhesion, shelf life and reduced settling
+Glaze type: liquid cone 6 stoneware glaze
+Firing: cone 6, around 1230°C
+Application: suitable for dipping and layering
+Clay bodies: suitable for porcelain and stoneware pieces
+Finish: atmospheric mid-fire glaze effects with colour depth and surface variation
 
-Crackle glaze results can vary depending on glaze thickness, clay body and firing process. Colour images should be used as a guide only, as colour reproduction and kiln conditions can both affect the final fired result.
+Fired results can vary depending on clay body, application thickness, layering and kiln conditions. Use test tiles to compare results before applying a new glaze or combination across a full batch of work.
 
 Task:
 Create:

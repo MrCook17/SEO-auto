@@ -23,7 +23,7 @@ CoordMode "Mouse", "Screen"
 ; - Stops before sending so the image attachment can be checked manually.
 ; - Extracts ChatGPT's automation block from the clipboard.
 ; - Pastes generated SEO fields into GO B2B.
-; - Does NOT click the main product Save button.
+; - Clicks the main product Save button after all fields are pasted in full mode only.
 ; - Automatically clicks the Image Details Save button after each image SEO field set is pasted, because GO B2B requires it to leave the image details page.
 ; - Can optionally paste ChatGPT's recommended product name with Ctrl + Alt + N.
 ; - Uses popups only for errors or blocking validation warnings.
@@ -36,26 +36,30 @@ CoordMode "Mouse", "Screen"
 cmsWinTitle := "GOb2b Admin - Cromartie Hobbycraft Limited - Catalogue Manager - Google Chrome"
 ; chatgptWinTitle := "Colour & Glaze - SEO Metadata Creation - Google Chrome"
 ; chatgptWinTitle := "Colour & Glaze - Product SEO Metadata Setup - Google Chrome"
-; chatgptWinTitle := "Colour & Glaze"
-chatgptWinTitle := "Arts & Crafts"
+chatgptWinTitle := "Colour & Glaze"
+; chatgptWinTitle := "Arts & Crafts"
+; chatgptWinTitle := "Opt"
 
 ; Available modes:
 ; "full" = current existing workflow
 ; "metadata" = metadata and image SEO
 ; "image" = image SEO for one ordinary product
 ; "matrix_image" = image SEO for every child of one matrix product
-SeoAutomationMode := "matrix_image"
+; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
+SeoAutomationMode := "matrix_full"
 
 FullPromptTemplatePath := A_ScriptDir "\prompt-template.md"
 MetadataPromptTemplatePath := A_ScriptDir "\prompt-template-metadata-only.md"
 ImageOnlyPromptTemplatePath := A_ScriptDir "\prompt-template-image-only.md"
 MatrixImagePromptTemplatePath := A_ScriptDir "\prompt-template-matrix-image.md"
+MatrixFullPromptTemplatePath := A_ScriptDir "\prompt-template-matrix-full.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
 logDir := A_ScriptDir "\logs"
 backupDir := A_ScriptDir "\backups"
 matrixStateFilePath := A_ScriptDir "\matrix-image-state.txt"
+matrixFullStateFilePath := A_ScriptDir "\matrix-full-state.txt"
 matrixNavigationDelayMs := 4000
 matrixReturnDelayMs := 3000
 matrixFullyReopenParentAfterReturn := true
@@ -67,20 +71,21 @@ matrixScrollWheelNotchesPerStep := 5
 matrixMaxScrollSteps := 30
 matrixNoNewRowsStopCount := 3
 global matrixState := 0
+global matrixFullState := 0
 global activeMatrixParentProductName := ""
 global LastEditButtons := []
 global LastDocument := 0
 
 ; Temporary hardcoded public product/category URL for {PAGE_URL} in the ChatGPT prompt.
 ; This avoids using the GO B2B CMS edit URL.
-hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/New-Products/GR-Pottery-Forms-Clay-Tools-and-Formers/..."
+hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes/..."
 
 ; Try to copy/paste the product image into ChatGPT after the prompt is pasted.
 ; The script still stops before sending so you can confirm the image attached correctly.
 attemptImageCopyAfterPrompt := true
 
-; Number of product images to copy into ChatGPT and update in GO B2B.
-; Change this to 1, 2, 3, etc. depending on the department/product range.
+; Fallback value used only until the Images tab is scanned with UIA-v2.
+; Every workflow now replaces this automatically from the Image Gallery cards.
 imageCountToProcess := 1
 
 ; Image/card coordinates on the Images tab.
@@ -92,7 +97,8 @@ imageTargets := [
     Map("image", [399, 454], "details_button", [319, 555]),
     Map("image", [645, 451], "details_button", [571, 552]),
     Map("image", [896, 460], "details_button", [820, 554]), ; x: 896, y: 460 x: 820, y: 554
-    Map("image", [1160, 459], "details_button", [1074, 551]) ; x: 1160, y: 459 x: 1074, y: 551
+    Map("image", [1160, 459], "details_button", [1074, 551]), ; x: 1160, y: 459 x: 1074, y: 551
+    Map("image", [1399, 459], "details_button", [1324, 552]) ; x: 1399, y: 459 x: 1324, y: 552
 ]
 
 ; High-quality image copy settings.
@@ -113,7 +119,7 @@ allowThumbnailImageCopyFallback := false
 ; Toggle with Ctrl + Alt + N.
 ; false = do not paste ChatGPT product name recommendation.
 ; true = paste the recommendation into the Product Name field when Ctrl + Alt + O runs.
-useRecommendedProductName := false
+useRecommendedProductName := true
 
 ; Chrome/Edge image context menu shortcut. On many Windows Chrome installs, "y" triggers Copy image.
 ; If the right-click fallback opens the wrong context menu item, change this to the shortcut that works on your browser.
@@ -128,7 +134,8 @@ chatPasteVerifyDelayMs := 900
 ; Coordinates from config-notes.md
 coords := Map(
     ; Initial CMS page
-    "product_edit_button", [1437, 310],
+    ; "product_edit_button", [1437, 310],
+    "product_edit_button", [1483, 310], ; x: 1483, y: 310
     ; Product page tabs/buttons
     "overview_tab", [288, 260],
     "description_tab", [378, 261],
@@ -152,6 +159,7 @@ coords := Map(
     "image_save_button", [1250, 734],
     ; ChatGPT
     "chat_input", [2323, 1018]
+    ; "chat_input", [2102, 972] ; x: 2102, y: 972
 )
 
 requiredInternalLinksDefault := "N/A"
@@ -170,6 +178,7 @@ NumpadEnter:: OpenProductBuildPromptAndPasteToChatGPT()
 Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!i:: TryCopyCmsImagesToChatGPT()
 ^!n:: ToggleRecommendedProductName()
+^0:: SetImageCountToProcess(0)
 ^1:: SetImageCountToProcess(1)
 ^2:: SetImageCountToProcess(2)
 ^3:: SetImageCountToProcess(3)
@@ -186,8 +195,7 @@ F9:: DumpAccessibilityTree()
 ^!r:: Reload()
 Esc:: ExitApp()
 
-; Main product save is intentionally disabled.
-; Only enable later after repeated testing on safe products.
+; Manual main product save remains disabled.
 ; ^!s::ClickPoint("product_save_button", 500)
 
 ; ==========================================================
@@ -198,8 +206,13 @@ TestScript() {
     global useRecommendedProductName, SeoAutomationMode, imageCountToProcess
     nameMode := useRecommendedProductName ? "ON" : "OFF"
     savedCount := 0
-    try savedCount := LoadMatrixState()["productCount"]
-    MsgBox "SEO mode: " SeoAutomationMode "`nImages: " imageCountToProcess "`nRecommended product-name insertion: " nameMode "`nUIA-v2 matrix support: available`nSaved matrix children: " savedCount
+    savedMode := "none"
+    try {
+        savedState := LoadMatrixState()
+        savedCount := savedState["productCount"]
+        savedMode := savedState["mode"]
+    }
+    MsgBox "SEO mode: " SeoAutomationMode "`nImages: " imageCountToProcess "`nRecommended product-name insertion: " nameMode "`nUIA-v2 matrix support: available`nSaved matrix state: " savedMode "`nSaved matrix children: " savedCount
 }
 
 CopyActiveWindowTitle() {
@@ -218,8 +231,8 @@ ToggleRecommendedProductName() {
 SetImageCountToProcess(imageCount) {
     global imageCountToProcess, imageTargets
 
-    if imageCount < 1 {
-        Flash("Image count must be at least 1.")
+    if imageCount < 0 {
+        Flash("Image count cannot be negative.")
         return false
     }
 
@@ -260,8 +273,8 @@ OpenProductBuildPromptAndPasteToChatGPT() {
         ; Do not copy the browser URL here because the active page is a GO B2B CMS URL.
         pageUrl := hardcodedPageUrl
 
-        if IsMatrixImageMode()
-            throw Error("NumpadEnter is not used for matrix_image mode. Open the matrix product and press Numpad4.")
+        if IsAnyMatrixMode()
+            throw Error("NumpadEnter is not used for matrix modes. Open the matrix parent and press Numpad4.")
         ClickPoint("product_edit_button", 1500)
         BuildPromptFromCurrentProductPage(pageUrl)
     } catch as err {
@@ -283,7 +296,9 @@ BuildPromptFromOpenProductPageAndPasteToChatGPT() {
         ; Use the temporary hardcoded public URL for {{PAGE_URL}}.
         ; Do not copy the browser URL here because the active page is a GO B2B CMS URL.
         pageUrl := hardcodedPageUrl
-        if IsMatrixImageMode()
+        if IsMatrixFullMode()
+            BuildMatrixFullPrompt(pageUrl)
+        else if IsMatrixImageMode()
             BuildMatrixImagePrompt(pageUrl)
         else
             BuildPromptFromCurrentProductPage(pageUrl)
@@ -325,6 +340,10 @@ BuildPromptFromCurrentProductPage(pageUrl) {
 
     LogText("original-fields", originalFields)
     BackupText("original-fields", originalFields)
+
+    ; Count actual gallery cards from their exact Remove buttons. Image labels
+    ; are deliberately ignored because GO B2B can skip label numbers.
+    DetectAndSetImageCountFromImagesTab()
 
     templatePath := GetPromptTemplatePath()
 
@@ -369,8 +388,8 @@ ValidateSeoAutomationMode() {
     global SeoAutomationMode
     mode := GetSeoAutomationMode()
 
-    if mode != "full" && mode != "metadata" && mode != "image" && mode != "matrix_image" {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image' or 'matrix_image'.")
+    if mode != "full" && mode != "metadata" && mode != "image" && mode != "matrix_image" && mode != "matrix_full" {
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image' or 'matrix_full'.")
     }
 }
 
@@ -395,8 +414,16 @@ IsMatrixImageMode() {
     return GetSeoAutomationMode() = "matrix_image"
 }
 
+IsMatrixFullMode() {
+    return GetSeoAutomationMode() = "matrix_full"
+}
+
+IsAnyMatrixMode() {
+    return IsMatrixImageMode() || IsMatrixFullMode()
+}
+
 GetPromptTemplatePath() {
-    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath
+    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath
 
     ValidateSeoAutomationMode()
 
@@ -408,6 +435,8 @@ GetPromptTemplatePath() {
 
     if IsMatrixImageMode()
         return MatrixImagePromptTemplatePath
+    if IsMatrixFullMode()
+        return MatrixFullPromptTemplatePath
 
     return FullPromptTemplatePath
 }
@@ -435,6 +464,17 @@ BuildPromptFromTemplate(template, pageUrl, productName, currentMetaTitle, curren
 ; ==========================================================
 
 EnsurePromptSupportsImageCount(prompt, imageCount) {
+    if imageCount = 0 {
+        ; Remove the template's default IMAGE_1 fields when this run has no
+        ; configured images. The ordinary-output parser then ends the preceding
+        ; field at the end of the automation block.
+        return RegExReplace(
+            prompt,
+            "is)IMAGE_1_TITLE:\s*[\r\n]+.*?===AUTOMATION_OUTPUT_END===",
+            "===AUTOMATION_OUTPUT_END==="
+        )
+    }
+
     if imageCount <= 1
         return prompt
 
@@ -820,11 +860,115 @@ ClickCoordinates(point, delayMs := 250) {
 ValidateImageTargetConfig() {
     global imageCountToProcess, imageTargets
 
-    if imageCountToProcess < 1
-        throw Error("imageCountToProcess must be at least 1.")
+    if imageCountToProcess < 0
+        throw Error("imageCountToProcess cannot be negative.")
 
     if imageCountToProcess > imageTargets.Length
         throw Error("imageCountToProcess is set to " imageCountToProcess ", but imageTargets only contains " imageTargets.Length " image coordinate entries.")
+}
+
+; Opens the Images tab and updates imageCountToProcess from the accessibility
+; tree. Each genuine gallery card has one exact-name Remove button, so this
+; remains correct when labels jump from (for example) Image 2 to Image 4.
+DetectAndSetImageCountFromImagesTab(expectedCount := -1) {
+    global imageCountToProcess, imageTargets, imageTabLoadDelayMs
+
+    ClickPoint("images_tab", imageTabLoadDelayMs)
+    detectedCount := WaitForStableImageGalleryCount()
+
+    if detectedCount > imageTargets.Length
+        throw Error("The Images tab contains " detectedCount " image(s), but imageTargets only has " imageTargets.Length " coordinate entries. Add more image targets before continuing.")
+
+    if expectedCount >= 0 && detectedCount != expectedCount
+        throw Error("Image count changed or differs between matrix children: expected " expectedCount ", detected " detectedCount ".")
+
+    imageCountToProcess := detectedCount
+    LogText("image-count-detected", "UIA-v2 detected " detectedCount " Image Gallery card(s).")
+    return detectedCount
+}
+
+WaitForStableImageGalleryCount(timeoutMs := 7000, stableDurationMs := 750) {
+    global LastDocument
+    deadline := A_TickCount + timeoutMs
+    previousCount := -1
+    stableSince := 0
+
+    Loop {
+        ToolTip "Reading Image Gallery accessibility tree..."
+        try {
+            document := UIA_Browser().GetCurrentDocumentElement()
+            LastDocument := document
+            gallery := FindImageGalleryScope(document)
+            if gallery {
+                count := CountImageGalleryCards(gallery)
+                if count = previousCount {
+                    if !stableSince
+                        stableSince := A_TickCount
+                    if A_TickCount - stableSince >= stableDurationMs {
+                        ToolTip()
+                        return count
+                    }
+                } else {
+                    previousCount := count
+                    stableSince := A_TickCount
+                }
+            }
+        } catch {
+            ; Chrome can briefly invalidate UIA elements while the tab renders.
+            ; Retry until the overall deadline instead of accepting a bad count.
+        }
+        if A_TickCount >= deadline {
+            ToolTip()
+            throw Error("The Image Gallery did not become available in the accessibility tree within " timeoutMs " ms. Leave the Images tab open and press F9 to dump the tree.")
+        }
+        Sleep 250
+    }
+}
+
+FindImageGalleryScope(document) {
+    try heading := document.FindElement({ Name: "Image Gallery", mm: 2, cs: 0 })
+    catch
+        return 0
+
+    scope := heading
+    Loop 12 {
+        ; The smallest ancestor exposing the gallery's Add control contains
+        ; the image cards without including unrelated page controls.
+        try addElements := scope.FindElements({ Name: "Add", mm: 2, cs: 0 })
+        catch
+            addElements := []
+        for _, element in addElements {
+            try {
+                if RegExMatch(Trim(element.Name), "i)^\+?\s*Add$")
+                    return scope
+            }
+        }
+        try parent := UIA.TreeWalkerTrue.GetParentElement(scope)
+        catch
+            break
+        if !parent
+            break
+        scope := parent
+    }
+    return 0
+}
+
+CountImageGalleryCards(scope) {
+    count := 0
+    try elements := scope.FindElements({ Name: "Remove", mm: 2, cs: 0 })
+    catch
+        return count
+
+    for _, element in elements {
+        try {
+            if StrLower(Trim(element.Name)) != "remove"
+                continue
+            if StrLower(GetUiaControlTypeText(element)) != "button"
+                continue
+            count += 1
+        }
+    }
+    return count
 }
 
 ; ==========================================================
@@ -839,10 +983,18 @@ PasteCopiedChatGPTOutputToCms() {
         ValidateSeoAutomationMode()
         ValidateImageTargetConfig()
 
+        if IsMatrixFullMode() {
+            PasteMatrixFullOutputToCms()
+            return
+        }
+
         if IsMatrixImageMode() {
             PasteMatrixImageOutputToCms()
             return
         }
+
+        ActivateWindow(cmsWinTitle)
+        DetectAndSetImageCountFromImagesTab()
 
         response := A_Clipboard
 
@@ -892,7 +1044,17 @@ PasteCopiedChatGPTOutputToCms() {
         ; Images tab: open each image details page and paste image metadata
         InsertImageSeoFields(imageTitles, imageAlts)
 
-        Flash(IsImageOnlyMode() ? "Image SEO fields pasted; main product was not saved." : "SEO fields pasted.")
+        ; Save the ordinary full and image-only workflows after every
+        ; requested image record has been updated.
+        if IsFullMode() || IsImageOnlyMode()
+            ClickPoint("product_save_button", 1000)
+
+        if IsFullMode()
+            Flash("SEO fields pasted and product saved.")
+        else if IsImageOnlyMode()
+            Flash("Image SEO fields pasted and product saved.")
+        else
+            Flash("SEO fields pasted; main product was not saved.")
     } catch as err {
         MsgBox "PasteCopiedChatGPTOutputToCms failed:`n`n" err.Message
     }
@@ -1353,12 +1515,17 @@ ValidateImageOutputValue(value, fieldName) {
 }
 
 ParseMatrixImageOutput(block, state) {
-    productCount := state["productCount"], imageCount := state["imagesPerProduct"]
-    expected := ["MODE", "PRODUCT_COUNT", "IMAGES_PER_PRODUCT"]
+    productCount := state["productCount"], parentImageCount := state["parentImageCount"]
+    expected := ["MODE", "PRODUCT_COUNT", "PARENT_IMAGE_COUNT", "TOTAL_IMAGE_COUNT"]
+    Loop parentImageCount {
+        expected.Push("PARENT_IMAGE_" A_Index "_TITLE")
+        expected.Push("PARENT_IMAGE_" A_Index "_ALT")
+    }
     Loop productCount {
         p := A_Index
         expected.Push("PRODUCT_" p "_NAME")
-        Loop imageCount {
+        expected.Push("PRODUCT_" p "_IMAGE_COUNT")
+        Loop state["products"][p]["imageCount"] {
             expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_TITLE")
             expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_ALT")
         }
@@ -1368,14 +1535,28 @@ ParseMatrixImageOutput(block, state) {
         throw Error("Matrix output MODE must be MATRIX_IMAGE.")
     if !IsInteger(fields["PRODUCT_COUNT"]) || Integer(fields["PRODUCT_COUNT"]) != productCount
         throw Error("Matrix product count does not match the saved prompt state.")
-    if !IsInteger(fields["IMAGES_PER_PRODUCT"]) || Integer(fields["IMAGES_PER_PRODUCT"]) != imageCount
-        throw Error("Images-per-product does not match the saved prompt state.")
+    if !IsInteger(fields["PARENT_IMAGE_COUNT"]) || Integer(fields["PARENT_IMAGE_COUNT"]) != parentImageCount
+        throw Error("Parent image count does not match the saved prompt state.")
+    if !IsInteger(fields["TOTAL_IMAGE_COUNT"]) || Integer(fields["TOTAL_IMAGE_COUNT"]) != GetMatrixTotalImageCount(state)
+        throw Error("Total image count does not match the saved prompt state.")
+    parentTitles := [], parentAlts := []
+    Loop parentImageCount {
+        i := A_Index
+        title := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_TITLE"], "Parent image " i " title")
+        alt := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_ALT"], "Parent image " i " alt")
+        if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
+            throw Error("Parent image " i " title and alt text are identical.")
+        parentTitles.Push(title), parentAlts.Push(alt)
+    }
     products := []
     Loop productCount {
         p := A_Index
+        imageCount := state["products"][p]["imageCount"]
         echoedName := fields["PRODUCT_" p "_NAME"]
         if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
             throw Error("Product " p " name does not match the saved matrix order.")
+        if !IsInteger(fields["PRODUCT_" p "_IMAGE_COUNT"]) || Integer(fields["PRODUCT_" p "_IMAGE_COUNT"]) != imageCount
+            throw Error("Product " p " image count does not match the saved prompt state.")
         titles := [], alts := []
         Loop imageCount {
             i := A_Index
@@ -1387,11 +1568,128 @@ ParseMatrixImageOutput(block, state) {
         }
         products.Push(Map("productName", echoedName, "imageTitles", titles, "imageAlts", alts))
     }
-    return Map("mode", "MATRIX_IMAGE", "productCount", productCount, "imagesPerProduct", imageCount, "products", products)
+    return Map("mode", "MATRIX_IMAGE", "productCount", productCount, "parentImageTitles", parentTitles, "parentImageAlts", parentAlts, "products", products)
 }
 
 NormaliseHarmlessWhitespace(value) {
     return StrLower(RegExReplace(Trim(value), "\s+", " "))
+}
+
+ParseMatrixFullOutput(block, state) {
+    productCount := state["productCount"], parentImageCount := state["parentImageCount"]
+    expected := ["MODE", "PRODUCT_COUNT", "PARENT_IMAGE_COUNT", "TOTAL_IMAGE_COUNT", "PARENT_PRODUCT_NAME_RECOMMENDATION", "PARENT_META_TITLE", "PARENT_META_DESCRIPTION"]
+    Loop parentImageCount {
+        expected.Push("PARENT_IMAGE_" A_Index "_TITLE")
+        expected.Push("PARENT_IMAGE_" A_Index "_ALT")
+    }
+    Loop productCount {
+        p := A_Index
+        expected.Push("PRODUCT_" p "_NAME")
+        expected.Push("PRODUCT_" p "_IMAGE_COUNT")
+        expected.Push("PRODUCT_" p "_HTML_SNIPPET")
+        Loop state["products"][p]["imageCount"] {
+            expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_TITLE")
+            expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_ALT")
+        }
+    }
+
+    ; Validate the complete label sequence first. This rejects duplicates,
+    ; missing fields, unexpected products and fields outside the saved matrix.
+    labels := []
+    pos := 1
+    while RegExMatch(block, "m)^\s*([A-Z][A-Z0-9_]*):\s*$", &match, pos) {
+        labels.Push(match[1])
+        pos := match.Pos(0) + match.Len(0)
+    }
+    if labels.Length != expected.Length
+        throw Error("Matrix-full output contains " labels.Length " fields; expected " expected.Length ".")
+    Loop expected.Length {
+        if labels[A_Index] != expected[A_Index]
+            throw Error("Matrix-full field " A_Index " must be " expected[A_Index] ", but found " labels[A_Index] ".")
+    }
+
+    fields := Map()
+    Loop expected.Length {
+        label := expected[A_Index]
+        startNeedle := label ":"
+        startPos := InStr(block, startNeedle)
+        startPos += StrLen(startNeedle)
+        if A_Index < expected.Length {
+            nextPos := InStr(block, expected[A_Index + 1] ":", , startPos)
+            value := SubStr(block, startPos, nextPos - startPos)
+        } else
+            value := SubStr(block, startPos)
+        fields[label] := Trim(value, " `t`r`n")
+    }
+
+    if fields["MODE"] != "MATRIX_FULL"
+        throw Error("Matrix-full output MODE must be MATRIX_FULL.")
+    if !IsInteger(fields["PRODUCT_COUNT"]) || Integer(fields["PRODUCT_COUNT"]) != productCount
+        throw Error("Matrix-full product count does not match the saved prompt state.")
+    if !IsInteger(fields["PARENT_IMAGE_COUNT"]) || Integer(fields["PARENT_IMAGE_COUNT"]) != parentImageCount
+        throw Error("Matrix-full parent image count does not match the saved prompt state.")
+    if !IsInteger(fields["TOTAL_IMAGE_COUNT"]) || Integer(fields["TOTAL_IMAGE_COUNT"]) != GetMatrixTotalImageCount(state)
+        throw Error("Matrix-full total image count does not match the saved prompt state.")
+
+    parentRecommendation := ValidateMatrixFullOneLine(fields["PARENT_PRODUCT_NAME_RECOMMENDATION"], "Parent product-name recommendation", false)
+    parentTitle := ValidateMatrixFullOneLine(fields["PARENT_META_TITLE"], "Parent meta title")
+    parentDescription := ValidateMatrixFullOneLine(fields["PARENT_META_DESCRIPTION"], "Parent meta description")
+    parentTitles := [], parentAlts := []
+    Loop parentImageCount {
+        i := A_Index
+        title := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_TITLE"], "Parent image " i " title")
+        alt := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_ALT"], "Parent image " i " alt")
+        if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
+            throw Error("Parent image " i " title and alt text are identical.")
+        parentTitles.Push(title), parentAlts.Push(alt)
+    }
+    products := []
+    Loop productCount {
+        p := A_Index
+        imageCount := state["products"][p]["imageCount"]
+        echoedName := ValidateMatrixFullOneLine(fields["PRODUCT_" p "_NAME"], "Product " p " name")
+        if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
+            throw Error("Product " p " name does not match saved child '" state["products"][p]["productName"] "'.")
+        if !IsInteger(fields["PRODUCT_" p "_IMAGE_COUNT"]) || Integer(fields["PRODUCT_" p "_IMAGE_COUNT"]) != imageCount
+            throw Error("Product " p " image count does not match the saved prompt state.")
+        html := StripCodeFence(fields["PRODUCT_" p "_HTML_SNIPPET"])
+        ValidateMatrixFullHtml(html, p)
+        titles := [], alts := []
+        Loop imageCount {
+            i := A_Index
+            title := ValidateImageOutputValue(fields["PRODUCT_" p "_IMAGE_" i "_TITLE"], "Product " p ", image " i " title")
+            alt := ValidateImageOutputValue(fields["PRODUCT_" p "_IMAGE_" i "_ALT"], "Product " p ", image " i " alt")
+            if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
+                throw Error("Product " p ", image " i " title and alt text are identical.")
+            titles.Push(title), alts.Push(alt)
+        }
+        products.Push(Map("productName", echoedName, "htmlSnippet", html, "imageTitles", titles, "imageAlts", alts))
+    }
+    return Map("mode", "MATRIX_FULL", "productCount", productCount, "parentProductNameRecommendation", parentRecommendation, "parentMetaTitle", parentTitle, "parentMetaDescription", parentDescription, "parentImageTitles", parentTitles, "parentImageAlts", parentAlts, "products", products)
+}
+
+ValidateMatrixFullOneLine(value, fieldName, requireValue := true) {
+    value := Trim(value)
+    if requireValue && value = ""
+        throw Error(fieldName " is empty.")
+    if InStr(value, "`n") || InStr(value, "`r")
+        throw Error(fieldName " must be one line.")
+    if RegExMatch(value, "i)^\s*\[.*\]\s*$") || InStr(value, "{{")
+        throw Error(fieldName " contains placeholder text.")
+    if RegExMatch(value, "i)(oaicite|contentReference|:source\[|\[citation)")
+        throw Error(fieldName " contains citation/source-token text.")
+    return value
+}
+
+ValidateMatrixFullHtml(html, productIndex) {
+    if Trim(html) = ""
+        throw Error("Product " productIndex " HTML snippet is empty.")
+    if InStr(html, "{{") || RegExMatch(html, "i)\[(exact|complete|insert|one-line|placeholder)[^]]*\]")
+        throw Error("Product " productIndex " HTML snippet contains placeholder text.")
+    if RegExMatch(html, "i)(oaicite|contentReference|:source\[|\[citation)")
+        throw Error("Product " productIndex " HTML snippet contains citation/source-token text.")
+    if InStr(html, Chr(96) Chr(96) Chr(96))
+        throw Error("Product " productIndex " HTML snippet still contains a code fence.")
 }
 
 ; ==========================================================
@@ -1399,7 +1697,7 @@ NormaliseHarmlessWhitespace(value) {
 ; ==========================================================
 
 BuildMatrixImagePrompt(pageUrl) {
-    global cmsWinTitle, imageCountToProcess, matrixState, MatrixImagePromptTemplatePath
+    global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixState, MatrixImagePromptTemplatePath
     global additionalProductNotesDefault, activeMatrixParentProductName
     ValidateImageTargetConfig()
     ActivateWindow(cmsWinTitle)
@@ -1410,6 +1708,9 @@ BuildMatrixImagePrompt(pageUrl) {
     parentTitle := CopyOptionalFromPoint("meta_title")
     firstHtml := ""
     parentDescription := CopyOptionalFromPoint("meta_description")
+    parentImageCount := DetectAndSetImageCountFromImagesTab()
+    if parentImageCount
+        TryCopyCmsImagesToChatGPT(false)
     ClickPoint("matrix_skus_tab", 1000)
     initial := ReacquireMatrixSkuControls(0)
     productCount := initial["buttons"].Length
@@ -1419,38 +1720,33 @@ BuildMatrixImagePrompt(pageUrl) {
         rowText := NormaliseMatrixRowText(initial["buttons"][p].RowText)
         exactName := ExtractMatrixProductNameFromRow(rowText, p)
         variantContext := ExtractMatrixVariantFromRow(rowText, exactName)
-        products.Push(Map("index", p, "productName", exactName, "variantContext", variantContext, "skuRowText", rowText))
+        products.Push(Map("index", p, "productName", exactName, "variantContext", variantContext, "skuRowText", rowText, "imageCount", 0))
     }
 
-    ; Restore the useful first-child HTML context. Only the first child needs
-    ; this extra text-collection visit; all names and variants remain sourced
-    ; from the matrix SKU accessibility rows.
-    ; Reuse the coordinate-only snapshot captured above. No UIA lookup occurs
-    ; after a child Cancel/Save transition during this stage.
-    controls := initial
-    ClickMatrixEditButton(controls["buttons"][1])
-    WaitForChildProductPage(1, productCount)
-    ClickPoint("description_tab", 600)
-    firstHtml := CopyOptionalFromPoint("html_snippet")
-    ClickPoint("matrix_child_cancel_button", 300)
-    WaitForMatrixSkuPage(1, productCount)
-    matrixState := Map("parentProductName", parentName, "productCount", productCount, "imagesPerProduct", imageCountToProcess, "products", products)
-    SaveMatrixState(matrixState)
-    prompt := BuildMatrixPromptFromState(FileRead(MatrixImagePromptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, firstHtml, matrixState)
-    LogText("matrix_image-parent-context", "Parent: " parentName "`nURL: " pageUrl "`nChildren: " productCount "`nImages per child: " imageCountToProcess)
-    LogText("matrix_image-prompt", prompt)
-    PastePromptToChatGPT(prompt)
+    ; Collect and attach each child's images during the same visit. Counts are
+    ; read independently because matrix children need not share an image count.
     Loop productCount {
         p := A_Index
-        ActivateWindow(cmsWinTitle)
-        ToolTip "Matrix product " p " of " productCount "`nAttaching images"
+        controls := ReacquireAndValidateMatrixOrder(products)
         ClickMatrixEditButton(controls["buttons"][p])
         WaitForChildProductPage(p, productCount)
-        TryCopyCmsImagesToChatGPT(false)
+        if p = 1 {
+            ClickPoint("description_tab", 600)
+            firstHtml := CopyOptionalFromPoint("html_snippet")
+        }
+        products[p]["imageCount"] := DetectAndSetImageCountFromImagesTab()
+        if products[p]["imageCount"]
+            TryCopyCmsImagesToChatGPT(false)
         ActivateWindow(cmsWinTitle)
         ClickPoint("matrix_child_cancel_button", 300)
         WaitForMatrixSkuPage(p, productCount)
     }
+    matrixState := Map("mode", "matrix_image", "parentProductName", parentName, "productCount", productCount, "parentImageCount", parentImageCount, "products", products)
+    SaveMatrixState(matrixState)
+    prompt := BuildMatrixPromptFromState(FileRead(MatrixImagePromptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, firstHtml, matrixState)
+    LogText("matrix_image-parent-context", "Parent: " parentName "`nURL: " pageUrl "`nChildren: " productCount "`nParent images: " parentImageCount "`nTotal images: " GetMatrixTotalImageCount(matrixState))
+    LogText("matrix_image-prompt", prompt)
+    PastePromptToChatGPT(prompt)
     ActivateWindow(chatgptWinTitle)
     FocusChatGptInputForPaste()
     Flash("Matrix prompt and attachments are ready for manual review.", 3000)
@@ -1459,20 +1755,163 @@ BuildMatrixImagePrompt(pageUrl) {
 BuildMatrixPromptFromState(template, pageUrl, metaTitle, metaDescription, firstHtml, state) {
     global additionalProductNotesDefault
     productsText := "", mapping := "", outputFields := "", attachment := 0
+    parentCount := state["parentImageCount"]
+    if parentCount {
+        Loop parentCount {
+            i := A_Index, attachment += 1
+            mapping .= "Attached image " attachment " = Parent matrix product, Image " i "`n"
+            outputFields .= "PARENT_IMAGE_" i "_TITLE:`n[one-line value]`n`nPARENT_IMAGE_" i "_ALT:`n[one-line value]`n`n"
+        }
+    }
     for p, product in state["products"] {
-        productsText .= "Product " p ":`nExact product name: " product["productName"] "`nVariant, size or colour difference: " product["variantContext"] "`nSKU row context: " EmptyToNA(product["skuRowText"]) "`nAttached images: Product " p " Image 1 through Product " p " Image " state["imagesPerProduct"] "`n`n"
-        outputFields .= "PRODUCT_" p "_NAME:`n[exact input product name unchanged]`n`n"
-        Loop state["imagesPerProduct"] {
+        imageCount := product["imageCount"]
+        imageSummary := imageCount = 0 ? "No images are configured for this product." : "Attached images: Product " p " Image 1 through Product " p " Image " imageCount
+        productsText .= "Product " p ":`nExact product name: " product["productName"] "`nVariant, size or colour difference: " product["variantContext"] "`nSKU row context: " EmptyToNA(product["skuRowText"]) "`n" imageSummary "`n`n"
+        outputFields .= "PRODUCT_" p "_NAME:`n[exact input product name unchanged]`n`nPRODUCT_" p "_IMAGE_COUNT:`n" imageCount "`n`n"
+        Loop imageCount {
             i := A_Index, attachment += 1
             mapping .= "Attached image " attachment " = Product " p ", Image " i "`n"
             outputFields .= "PRODUCT_" p "_IMAGE_" i "_TITLE:`n[one-line value]`n`nPRODUCT_" p "_IMAGE_" i "_ALT:`n[one-line value]`n`n"
         }
     }
     prompt := template
-    replacements := Map("{{PAGE_URL}}", pageUrl, "{{MATRIX_PRODUCT_NAME}}", state["parentProductName"], "{{CURRENT_META_TITLE}}", EmptyToNA(metaTitle), "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(metaDescription), "{{FIRST_CHILD_HTML_SNIPPET}}", EmptyToNA(firstHtml), "{{PRODUCT_COUNT}}", state["productCount"], "{{IMAGES_PER_PRODUCT}}", state["imagesPerProduct"], "{{MATRIX_PRODUCTS}}", Trim(productsText), "{{ATTACHMENT_ORDER}}", Trim(mapping), "{{IMAGE_NOTES}}", "Every child has " state["imagesPerProduct"] " configured image(s).", "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotesDefault, "{{MATRIX_AUTOMATION_OUTPUT_FIELDS}}", outputFields)
+    replacements := Map("{{PAGE_URL}}", pageUrl, "{{MATRIX_PRODUCT_NAME}}", state["parentProductName"], "{{CURRENT_META_TITLE}}", EmptyToNA(metaTitle), "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(metaDescription), "{{FIRST_CHILD_HTML_SNIPPET}}", EmptyToNA(firstHtml), "{{PRODUCT_COUNT}}", state["productCount"], "{{PARENT_IMAGE_COUNT}}", parentCount, "{{TOTAL_IMAGE_COUNT}}", GetMatrixTotalImageCount(state), "{{MATRIX_PRODUCTS}}", Trim(productsText), "{{ATTACHMENT_ORDER}}", EmptyToNA(Trim(mapping)), "{{IMAGE_NOTES}}", BuildMatrixImageCountSummary(state), "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotesDefault, "{{MATRIX_AUTOMATION_OUTPUT_FIELDS}}", outputFields)
     for token, value in replacements
         prompt := StrReplace(prompt, token, value)
     return prompt
+}
+
+BuildMatrixFullPrompt(pageUrl) {
+    global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixFullState
+    global MatrixFullPromptTemplatePath, activeMatrixParentProductName
+    ValidateImageTargetConfig()
+    ActivateWindow(cmsWinTitle)
+    ClickPoint("overview_tab", 500)
+    parentName := CopyFromPoint("product_name")
+    activeMatrixParentProductName := parentName
+    ClickPoint("description_tab", 600)
+    parentTitle := CopyOptionalFromPoint("meta_title")
+    parentDescription := CopyOptionalFromPoint("meta_description")
+    parentImageCount := DetectAndSetImageCountFromImagesTab()
+    if parentImageCount
+        TryCopyCmsImagesToChatGPT(false)
+    ClickPoint("matrix_skus_tab", 1000)
+    controls := ReacquireMatrixSkuControls(0)
+    productCount := controls["buttons"].Length
+    products := []
+    Loop productCount {
+        p := A_Index
+        rowText := NormaliseMatrixRowText(controls["buttons"][p].RowText)
+        exactName := ExtractMatrixProductNameFromRow(rowText, p)
+        products.Push(Map("index", p, "productName", exactName, "variantContext", ExtractMatrixVariantFromRow(rowText, exactName), "skuRowText", rowText, "originalHtmlSnippet", "", "imageCount", 0))
+    }
+
+    ; Visit every child separately. As in matrix_image, fully close and reopen
+    ; the parent after every child return because GO b2b otherwise leaves
+    ; Chrome's accessibility tree in a broken/stale state.
+    Loop productCount {
+        p := A_Index
+        controls := ReacquireAndValidateMatrixOrder(products)
+        ClickMatrixEditButton(controls["buttons"][p])
+        WaitForChildProductPage(p, productCount)
+        ClickPoint("overview_tab", 400)
+        currentName := CopyFromPoint("product_name")
+        if NormaliseHarmlessWhitespace(currentName) != NormaliseHarmlessWhitespace(products[p]["productName"])
+            throw Error("Matrix-full collection opened the wrong child at product " p ". Expected '" products[p]["productName"] "', found '" currentName "'.")
+        ClickPoint("description_tab", 600)
+        products[p]["originalHtmlSnippet"] := CopyOptionalFromPoint("html_snippet")
+        products[p]["imageCount"] := DetectAndSetImageCountFromImagesTab()
+        if products[p]["imageCount"]
+            TryCopyCmsImagesToChatGPT(false)
+        ActivateWindow(cmsWinTitle)
+        LogText("matrix_full-child-context", "Product " p ": " products[p]["productName"] "`nVariant: " products[p]["variantContext"] "`nSKU row: " products[p]["skuRowText"] "`nHTML:`n" products[p]["originalHtmlSnippet"])
+        ClickPoint("matrix_child_cancel_button", 300)
+        WaitForMatrixSkuPage(p, productCount)
+    }
+
+    matrixFullState := Map("mode", "matrix_full", "parentProductName", parentName, "productCount", productCount, "parentImageCount", parentImageCount, "products", products)
+    SaveMatrixState(matrixFullState)
+    prompt := BuildMatrixFullPromptFromState(FileRead(MatrixFullPromptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, matrixFullState)
+    LogText("matrix_full-parent-context", "Parent: " parentName "`nURL: " pageUrl "`nMeta title: " parentTitle "`nMeta description: " parentDescription "`nChildren: " productCount "`nParent images: " parentImageCount "`nTotal images: " GetMatrixTotalImageCount(matrixFullState))
+    LogText("matrix_full-prompt", prompt)
+    PastePromptToChatGPT(prompt)
+
+    ActivateWindow(chatgptWinTitle)
+    FocusChatGptInputForPaste()
+    Flash("Matrix-full prompt and attachments are ready for manual review.", 3000)
+}
+
+BuildMatrixFullPromptFromState(template, pageUrl, metaTitle, metaDescription, state) {
+    productsText := "", mapping := "", outputFields := "", attachment := 0, bt := Chr(96)
+    parentCount := state["parentImageCount"]
+    Loop parentCount {
+        i := A_Index, attachment += 1
+        mapping .= "Attached image " attachment " = Parent matrix product, Image " i "`n"
+        outputFields .= "PARENT_IMAGE_" i "_TITLE:`n[one-line image title]`n`nPARENT_IMAGE_" i "_ALT:`n[one-line image alt text]`n`n"
+    }
+    for p, product in state["products"] {
+        imageCount := product["imageCount"]
+        imageSummary := imageCount = 0 ? "No images are configured for this product." : "Attached images: Product " p " Image 1 through Product " p " Image " imageCount
+        productsText .= "Product " p ":`nExact child product name (audit identifier): " product["productName"] "`nVariant context: " product["variantContext"] "`nFull SKU row context: " EmptyToNA(product["skuRowText"]) "`nCurrent child HTML/product description snippet:`n" bt bt bt "html`n" product["originalHtmlSnippet"] "`n" bt bt bt "`n" imageSummary "`n`n"
+        outputFields .= "PRODUCT_" p "_NAME:`n[exact original child name unchanged]`n`nPRODUCT_" p "_IMAGE_COUNT:`n" imageCount "`n`nPRODUCT_" p "_HTML_SNIPPET:`n" bt bt bt "html`n[complete multiline child HTML]`n" bt bt bt "`n`n"
+        Loop imageCount {
+            i := A_Index, attachment += 1
+            mapping .= "Attached image " attachment " = Product " p ", Image " i "`n"
+            outputFields .= "PRODUCT_" p "_IMAGE_" i "_TITLE:`n[one-line image title]`n`nPRODUCT_" p "_IMAGE_" i "_ALT:`n[one-line image alt text]`n`n"
+        }
+    }
+    replacements := Map(
+        "{{PAGE_URL}}", pageUrl,
+        "{{MATRIX_PRODUCT_NAME}}", state["parentProductName"],
+        "{{CURRENT_META_TITLE}}", EmptyToNA(metaTitle),
+        "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(metaDescription),
+        "{{PRODUCT_COUNT}}", state["productCount"],
+        "{{PARENT_IMAGE_COUNT}}", parentCount,
+        "{{TOTAL_IMAGE_COUNT}}", GetMatrixTotalImageCount(state),
+        "{{MATRIX_PRODUCTS}}", Trim(productsText),
+        "{{ATTACHMENT_ORDER}}", Trim(mapping),
+        "{{IMAGE_NOTES}}", BuildMatrixImageCountSummary(state),
+        "{{MATRIX_AUTOMATION_OUTPUT_FIELDS}}", outputFields
+    )
+    prompt := template
+    for token, value in replacements
+        prompt := StrReplace(prompt, token, value)
+    return prompt
+}
+
+GetMatrixTotalImageCount(state) {
+    total := state["parentImageCount"]
+    for _, product in state["products"]
+        total += product["imageCount"]
+    return total
+}
+
+BuildMatrixImageCountSummary(state) {
+    summary := "Parent matrix product: " state["parentImageCount"] " image(s)."
+    for p, product in state["products"]
+        summary .= "`nProduct " p ": " product["imageCount"] " image(s)."
+    summary .= "`nTotal attachments: " GetMatrixTotalImageCount(state) "."
+    return summary
+}
+
+ValidateMatrixStateImageTargets(state, availableTargets) {
+    if state["parentImageCount"] > availableTargets
+        throw Error("Saved matrix parent needs " state["parentImageCount"] " image target(s), but only " availableTargets " are configured.")
+    for p, product in state["products"] {
+        if product["imageCount"] > availableTargets
+            throw Error("Saved matrix product " p " needs " product["imageCount"] " image target(s), but only " availableTargets " are configured.")
+    }
+}
+
+ReacquireAndValidateMatrixOrder(products) {
+    controls := ReacquireMatrixSkuControls(products.Length)
+    Loop products.Length {
+        rowText := NormaliseMatrixRowText(controls["buttons"][A_Index].RowText)
+        currentName := ExtractMatrixProductNameFromRow(rowText, A_Index)
+        if NormaliseHarmlessWhitespace(currentName) != NormaliseHarmlessWhitespace(products[A_Index]["productName"])
+            throw Error("Matrix SKU order changed at product " A_Index ". Expected '" products[A_Index]["productName"] "', detected '" currentName "'.")
+    }
+    return controls
 }
 
 DeriveVariantContext(productName, rowText) {
@@ -1480,12 +1919,103 @@ DeriveVariantContext(productName, rowText) {
     return rowText = "" ? "Not separately available; see product name" : rowText
 }
 
+PasteMatrixFullOutputToCms() {
+    global cmsWinTitle, imageCountToProcess, imageTargets, activeMatrixParentProductName, useRecommendedProductName
+    state := LoadMatrixState("matrix_full")
+    activeMatrixParentProductName := state["parentProductName"]
+    ValidateMatrixStateImageTargets(state, imageTargets.Length)
+    response := A_Clipboard
+    block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
+    if block = ""
+        throw Error("A complete matrix-full automation block is not on the clipboard.")
+
+    ; Parsing and validation finish before the first CMS field is changed.
+    output := ParseMatrixFullOutput(block, state)
+    LogText("matrix_full-chatgpt-output", response)
+    LogText("matrix_full-automation-block", block)
+    LogText("matrix_full-parsed-output", BuildMatrixFullParsedLog(output))
+    ActivateWindow(cmsWinTitle)
+
+    if useRecommendedProductName && IsUsableProductNameRecommendation(output["parentProductNameRecommendation"]) {
+        InsertProductNameRecommendation(output["parentProductNameRecommendation"])
+        ; Read the value back from GO b2b and use that exact CMS value for the
+        ; catalogue lookup. The pasted recommendation may contain whitespace
+        ; or characters which the input normalises when it accepts the value.
+        activeMatrixParentProductName := CopyFromPoint("product_name")
+        if Trim(activeMatrixParentProductName) = ""
+            throw Error("The renamed matrix parent could not be read back from the Product Name field.")
+        LogText("matrix_full-update", "Parent reopen name after rename: " activeMatrixParentProductName)
+    }
+    InsertMatrixParentMetaFields(output["parentMetaTitle"], output["parentMetaDescription"])
+    if state["parentImageCount"] {
+        detectedParentCount := DetectAndSetImageCountFromImagesTab(state["parentImageCount"])
+        Loop detectedParentCount
+            PasteImageMetadataToCms(A_Index, output["parentImageTitles"][A_Index], output["parentImageAlts"][A_Index])
+    }
+
+    ; GO b2b invalidates/stales the matrix accessibility tree after any parent
+    ; field is changed. Save and fully reopen the exact parent before opening
+    ; Matrix SKUs, using the same recovery path as child return transitions.
+    FullyReopenActiveMatrixParent()
+    ClickPoint("matrix_skus_tab", 1000)
+
+    Loop state["productCount"] {
+        p := A_Index
+        try {
+            controls := ReacquireAndValidateMatrixOrder(state["products"])
+            ClickMatrixEditButton(controls["buttons"][p])
+            WaitForChildProductPage(p, state["productCount"])
+            ClickPoint("overview_tab", 400)
+            currentName := CopyFromPoint("product_name")
+            if NormaliseHarmlessWhitespace(currentName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
+                throw Error("current child name no longer matches saved product '" state["products"][p]["productName"] "'; found '" currentName "'.")
+            childImageCount := state["products"][p]["imageCount"]
+            DetectAndSetImageCountFromImagesTab(childImageCount)
+            ClickPoint("description_tab", 600)
+            PasteToPoint("html_snippet", output["products"][p]["htmlSnippet"])
+            Loop childImageCount {
+                i := A_Index
+                ToolTip "Matrix-full product " p " of " state["productCount"] "`nPasting image SEO " i " of " childImageCount
+                PasteImageMetadataToCms(i, output["products"][p]["imageTitles"][i], output["products"][p]["imageAlts"][i])
+            }
+            ClickPoint("matrix_child_save_button", 300)
+            WaitForMatrixSkuPage(p, state["productCount"])
+            LogText("matrix_full-update", "Product " p ": " state["products"][p]["productName"] "; HTML and " childImageCount " image record(s) updated.")
+        } catch as err {
+            LogText("matrix_full-error", "Product " p " ('" state["products"][p]["productName"] "'): " err.Message)
+            throw Error("Matrix-full product " p " of " state["productCount"] " ('" state["products"][p]["productName"] "'):`n" err.Message "`n`nProcessing stopped to avoid updating the wrong child.")
+        }
+    }
+    ToolTip()
+    totalImages := GetMatrixTotalImageCount(state)
+    nameStatus := useRecommendedProductName && IsUsableProductNameRecommendation(output["parentProductNameRecommendation"]) ? "Parent product name recommendation and metadata were pasted." : "Parent metadata was pasted; parent product name was left unchanged."
+    MsgBox "Matrix-full SEO complete.`nChild products: " state["productCount"] "`nParent images: " state["parentImageCount"] "`nChild HTML snippets updated: " state["productCount"] "`nTotal image records updated: " totalImages "`n" nameStatus "`nThe parent was saved/reopened by the matrix accessibility-tree recovery workflow."
+}
+
+BuildMatrixFullParsedLog(output) {
+    text := "Mode: " output["mode"] "`nParent recommendation: " output["parentProductNameRecommendation"] "`nParent meta title: " output["parentMetaTitle"] "`nParent meta description: " output["parentMetaDescription"] "`nProducts: " output["productCount"] "`n"
+    Loop output["parentImageTitles"].Length
+        text .= "Parent image " A_Index " title: " output["parentImageTitles"][A_Index] "`nParent image " A_Index " alt: " output["parentImageAlts"][A_Index] "`n"
+    for p, product in output["products"] {
+        text .= "`nProduct " p ": " product["productName"] "`nHTML:`n" product["htmlSnippet"] "`n"
+        Loop product["imageTitles"].Length
+            text .= "Image " A_Index " title: " product["imageTitles"][A_Index] "`nImage " A_Index " alt: " product["imageAlts"][A_Index] "`n"
+    }
+    return text
+}
+
+InsertMatrixParentMetaFields(metaTitle, metaDescription) {
+    ; Deliberately cannot paste HTML and never clicks the parent Save button.
+    ClickPoint("description_tab", 600)
+    PasteToPoint("meta_title", metaTitle)
+    PasteToPoint("meta_description", metaDescription)
+}
+
 PasteMatrixImageOutputToCms() {
-    global cmsWinTitle, imageCountToProcess, activeMatrixParentProductName
+    global cmsWinTitle, imageCountToProcess, imageTargets, activeMatrixParentProductName
     state := LoadMatrixState()
     activeMatrixParentProductName := state["parentProductName"]
-    if state["imagesPerProduct"] != imageCountToProcess
-        throw Error("Saved matrix state uses " state["imagesPerProduct"] " image(s), but imageCountToProcess is " imageCountToProcess ".")
+    ValidateMatrixStateImageTargets(state, imageTargets.Length)
     response := A_Clipboard
     block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
     if block = ""
@@ -1493,6 +2023,15 @@ PasteMatrixImageOutputToCms() {
     output := ParseMatrixImageOutput(block, state)
     LogText("matrix_image-chatgpt-output", response)
     ActivateWindow(cmsWinTitle)
+    if state["parentImageCount"] {
+        DetectAndSetImageCountFromImagesTab(state["parentImageCount"])
+        Loop state["parentImageCount"]
+            PasteImageMetadataToCms(A_Index, output["parentImageTitles"][A_Index], output["parentImageAlts"][A_Index])
+    }
+    ; Saving/reopening also guarantees a fresh matrix accessibility tree after
+    ; parent-image detail edits.
+    FullyReopenActiveMatrixParent()
+    ClickPoint("matrix_skus_tab", 1000)
     ; Scan once at the start of the insertion stage. This validates the child
     ; count and stores fresh screen coordinates, but no UIA lookup is performed
     ; after any child Save transition.
@@ -1506,9 +2045,11 @@ PasteMatrixImageOutputToCms() {
             currentName := CopyFromPoint("product_name")
             if NormaliseHarmlessWhitespace(currentName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
                 throw Error("current child name no longer matches saved product " p " ('" state["products"][p]["productName"] "').")
-            Loop state["imagesPerProduct"] {
+            childImageCount := state["products"][p]["imageCount"]
+            DetectAndSetImageCountFromImagesTab(childImageCount)
+            Loop childImageCount {
                 i := A_Index
-                ToolTip "Matrix product " p " of " state["productCount"] "`nPasting image SEO " i " of " state["imagesPerProduct"]
+                ToolTip "Matrix product " p " of " state["productCount"] "`nPasting image SEO " i " of " childImageCount
                 PasteImageMetadataToCms(i, output["products"][p]["imageTitles"][i], output["products"][p]["imageAlts"][i])
                 LogText("matrix_image-update", "Product " p ": " state["products"][p]["productName"] ", image " i " updated.")
             }
@@ -1520,55 +2061,81 @@ PasteMatrixImageOutputToCms() {
         }
     }
     ToolTip()
-    total := state["productCount"] * state["imagesPerProduct"]
-    MsgBox "Matrix image SEO complete.`nProducts: " state["productCount"] "`nImages per product: " state["imagesPerProduct"] "`nTotal image records: " total
+    total := GetMatrixTotalImageCount(state)
+    MsgBox "Matrix image SEO complete.`nProducts: " state["productCount"] "`nParent images: " state["parentImageCount"] "`nTotal image records: " total
 }
 
 SaveMatrixState(state) {
-    global matrixStateFilePath
-    text := "CROMARTIE_MATRIX_STATE_V1`n"
+    global matrixStateFilePath, matrixFullStateFilePath
+    mode := state.Has("mode") ? state["mode"] : "matrix_image"
+    if mode != "matrix_image" && mode != "matrix_full"
+        throw Error("Cannot save unsupported matrix state mode '" mode "'.")
+    filePath := mode = "matrix_full" ? matrixFullStateFilePath : matrixStateFilePath
+    text := mode = "matrix_full" ? "CROMARTIE_MATRIX_FULL_STATE_V2`nmode`tmatrix_full`n" : "CROMARTIE_MATRIX_STATE_V2`n"
     text .= "parent`t" EncodeStateValue(state["parentProductName"]) "`n"
-    text .= "count`t" state["productCount"] "`nimages`t" state["imagesPerProduct"] "`n"
-    for _, product in state["products"]
-        text .= "product`t" product["index"] "`t" EncodeStateValue(product["productName"]) "`t" EncodeStateValue(product["variantContext"]) "`t" EncodeStateValue(product["skuRowText"]) "`n"
-    if FileExist(matrixStateFilePath)
-        FileDelete matrixStateFilePath
-    FileAppend text, matrixStateFilePath, "UTF-8"
+    text .= "count`t" state["productCount"] "`nparent_images`t" state["parentImageCount"] "`n"
+    for _, product in state["products"] {
+        text .= "product`t" product["index"] "`t" product["imageCount"] "`t" EncodeStateValue(product["productName"]) "`t" EncodeStateValue(product["variantContext"]) "`t" EncodeStateValue(product["skuRowText"])
+        if mode = "matrix_full"
+            text .= "`t" EncodeStateValue(product["originalHtmlSnippet"])
+        text .= "`n"
+    }
+    if FileExist(filePath)
+        FileDelete filePath
+    FileAppend text, filePath, "UTF-8"
 }
 
-LoadMatrixState() {
-    global matrixStateFilePath, matrixState
-    if matrixState
+LoadMatrixState(requestedMode := "") {
+    global matrixStateFilePath, matrixFullStateFilePath, matrixState, matrixFullState
+    mode := requestedMode != "" ? StrLower(Trim(requestedMode)) : (IsMatrixFullMode() ? "matrix_full" : "matrix_image")
+    if mode != "matrix_image" && mode != "matrix_full"
+        throw Error("Unsupported matrix state mode '" mode "'.")
+    if mode = "matrix_full" && matrixFullState
+        return matrixFullState
+    if mode = "matrix_image" && matrixState
         return matrixState
-    if !FileExist(matrixStateFilePath)
-        throw Error("No saved matrix state exists. Build the matrix prompt with Numpad4 first.")
-    lines := StrSplit(StrReplace(FileRead(matrixStateFilePath, "UTF-8"), "`r", ""), "`n")
-    if lines.Length < 4 || lines[1] != "CROMARTIE_MATRIX_STATE_V1"
+    filePath := mode = "matrix_full" ? matrixFullStateFilePath : matrixStateFilePath
+    expectedHeader := mode = "matrix_full" ? "CROMARTIE_MATRIX_FULL_STATE_V2" : "CROMARTIE_MATRIX_STATE_V2"
+    if !FileExist(filePath)
+        throw Error("No saved " mode " state exists. Build its matrix prompt with Numpad4 first.")
+    lines := StrSplit(StrReplace(FileRead(filePath, "UTF-8"), "`r", ""), "`n")
+    if lines.Length < 4 || lines[1] != expectedHeader
         throw Error("The saved matrix state file is invalid or unsupported.")
-    products := [], parent := "", count := 0, images := 0
+    products := [], parent := "", count := 0, parentImages := 0
     Loop lines.Length - 1 {
         line := lines[A_Index + 1]
         if line = ""
             continue
         parts := StrSplit(line, "`t")
         switch parts[1] {
+            case "mode":
+                if parts.Length != 2 || parts[2] != mode
+                    throw Error("The saved matrix state mode does not match " mode ".")
             case "parent": parent := DecodeStateValue(parts[2])
             case "count": count := Integer(parts[2])
-            case "images": images := Integer(parts[2])
+            case "parent_images": parentImages := Integer(parts[2])
             case "product":
-                if parts.Length != 5
+                expectedParts := mode = "matrix_full" ? 7 : 6
+                if parts.Length != expectedParts
                     throw Error("A product record in the matrix state file is invalid.")
-                products.Push(Map("index", Integer(parts[2]), "productName", DecodeStateValue(parts[3]), "variantContext", DecodeStateValue(parts[4]), "skuRowText", DecodeStateValue(parts[5])))
+                product := Map("index", Integer(parts[2]), "imageCount", Integer(parts[3]), "productName", DecodeStateValue(parts[4]), "variantContext", DecodeStateValue(parts[5]), "skuRowText", DecodeStateValue(parts[6]))
+                if mode = "matrix_full"
+                    product["originalHtmlSnippet"] := DecodeStateValue(parts[7])
+                products.Push(product)
         }
     }
-    if parent = "" || count < 1 || images < 1 || products.Length != count
+    if parent = "" || count < 1 || parentImages < 0 || products.Length != count
         throw Error("The saved matrix state is incomplete.")
     Loop count {
-        if products[A_Index]["index"] != A_Index || products[A_Index]["productName"] = ""
+        if products[A_Index]["index"] != A_Index || products[A_Index]["productName"] = "" || products[A_Index]["imageCount"] < 0
             throw Error("The saved matrix product order is invalid.")
     }
-    matrixState := Map("parentProductName", parent, "productCount", count, "imagesPerProduct", images, "products", products)
-    return matrixState
+    loaded := Map("mode", mode, "parentProductName", parent, "productCount", count, "parentImageCount", parentImages, "products", products)
+    if mode = "matrix_full"
+        matrixFullState := loaded
+    else
+        matrixState := loaded
+    return loaded
 }
 
 EncodeStateValue(value) {
@@ -2074,7 +2641,7 @@ WaitForChildProductPage(productIndex, productCount) {
     }
 }
 
-WaitForMatrixSkuPage(productIndex, expectedCount) {
+WaitForMatrixSkuPage(productIndex, expectedCount, allowParentReopen := true) {
     global matrixReturnDelayMs, matrixFullyReopenParentAfterReturn
     ; Cancel/Save has already been clicked. Do not interrogate the
     ; accessibility tree during this transition; allow GO b2b three seconds
@@ -2082,7 +2649,7 @@ WaitForMatrixSkuPage(productIndex, expectedCount) {
     ToolTip "Waiting for the matrix SKU page to load..."
     Sleep matrixReturnDelayMs
 
-    if matrixFullyReopenParentAfterReturn
+    if allowParentReopen && matrixFullyReopenParentAfterReturn
         FullyReopenActiveMatrixParent()
     ToolTip()
     return true
@@ -2129,6 +2696,15 @@ WaitForCatalogueProductEditButton(productName, timeoutMs) {
 
 FindCatalogueProductEditButton(document, productName) {
     targetName := NormaliseCatalogueProductName(productName)
+
+    ; Prefer matching the accessible row belonging to each live Edit button.
+    ; Some GO b2b catalogue views do not expose the product-name text as a
+    ; separate searchable UIA element after a rename, although the Edit
+    ; button's ancestor row still contains the complete current name.
+    directMatch := FindCatalogueMatrixParentEditByRow(document, targetName)
+    if directMatch
+        return directMatch
+
     words := StrSplit(targetName, " "), searchAnchor := ""
     Loop Min(3, words.Length)
         searchAnchor .= (A_Index > 1 ? " " : "") words[A_Index]
@@ -2181,6 +2757,48 @@ FindCatalogueProductEditButton(document, productName) {
     ; Adjacent catalogue rows are roughly 53 pixels apart. This tolerance
     ; accepts the target row while rejecting the Edit buttons above and below.
     return best && bestDistance <= 35 ? best : 0
+}
+
+FindCatalogueMatrixParentEditByRow(document, targetName) {
+    try editElements := document.FindElements({ Name: "Edit", mm: 2, cs: 0 })
+    catch
+        return 0
+
+    for _, editElement in editElements {
+        try {
+            if editElement.IsOffscreen || StrLower(Trim(editElement.Name)) != "edit"
+                continue
+            rect := editElement.Location
+            if rect.w <= 0 || rect.h <= 0
+                continue
+            if !CatalogueEditBelongsToMatrixParent(editElement, targetName)
+                continue
+            return { CentreX: Round(rect.x + rect.w / 2), CentreY: Round(rect.y + rect.h / 2) }
+        }
+    }
+    return 0
+}
+
+CatalogueEditBelongsToMatrixParent(editElement, targetName) {
+    node := editElement
+    Loop 10 {
+        try node := UIA.TreeWalkerTrue.GetParentElement(node)
+        catch
+            return false
+        if !node
+            return false
+        try rowText := NormaliseCatalogueProductName(node.Name)
+        catch
+            continue
+        if !InStr(rowText, targetName)
+            continue
+        ; The catalogue can show child Matrix SKU rows directly beneath their
+        ; parent. Only an ancestor explicitly identifying a Matrix Product is
+        ; allowed to satisfy the reopen lookup.
+        if InStr(rowText, "matrix product") && !InStr(rowText, "matrix sku")
+            return true
+    }
+    return false
 }
 
 NormaliseCatalogueProductName(value) {

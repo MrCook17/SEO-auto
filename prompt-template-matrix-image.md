@@ -17,7 +17,8 @@ First-child HTML context (context only; it may contain a size or variant detail 
 {{FIRST_CHILD_HTML_SNIPPET}}
 
 Detected products: {{PRODUCT_COUNT}}
-Images per product: {{IMAGES_PER_PRODUCT}}
+Parent matrix-product images: {{PARENT_IMAGE_COUNT}}
+Total attached images: {{TOTAL_IMAGE_COUNT}}
 
 Products in stable CMS order:
 {{MATRIX_PRODUCTS}}
@@ -31,7 +32,7 @@ Image notes:
 Additional product notes:
 {{ADDITIONAL_PRODUCT_NOTES}}
 
-Inspect every image and create one concise product-led title and one accurate alt text for it. Tailor each set to the correct child and the GR Pottery Forms Clay Tools and Formers page. Preserve verified shape, size, form and other variant distinctions, but never assume the first child’s details apply to another child. Use UK English and “colour”, except in official names. Keep title and alt different, avoid keyword stuffing, and do not invent visual, material, dimensional, compatibility, usage or technical details.
+Inspect every image and create one concise product-led title and one accurate alt text for it. Follow the attachment map exactly: parent images belong to the main matrix product, while child images belong only to their mapped child. Tailor each set to the correct product and the GR Pottery Forms Clay Tools and Formers page. Preserve verified shape, size, form and other variant distinctions, but never assume one child’s details apply to another child or to the parent. Use UK English and “colour”, except in official names. Keep title and alt different, avoid keyword stuffing, and do not invent visual, material, dimensional, compatibility, usage or technical details.
 
 Do not produce parent metadata, descriptions or HTML. Echo each exact child name unchanged in its audit field. Keep every automation value on one line. Include no citations, source tokens, commentary, placeholders or code fences. Return only this block:
 
@@ -42,7 +43,10 @@ MATRIX_IMAGE
 PRODUCT_COUNT:
 {{PRODUCT_COUNT}}
 
-IMAGES_PER_PRODUCT:
-{{IMAGES_PER_PRODUCT}}
+PARENT_IMAGE_COUNT:
+{{PARENT_IMAGE_COUNT}}
+
+TOTAL_IMAGE_COUNT:
+{{TOTAL_IMAGE_COUNT}}
 
 {{MATRIX_AUTOMATION_OUTPUT_FIELDS}}===AUTOMATION_OUTPUT_END===
