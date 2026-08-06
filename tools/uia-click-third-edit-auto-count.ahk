@@ -2,13 +2,14 @@
 #SingleInstance Force
 
 ; Folder structure:
-;   uia-click-third-edit-auto-count.ahk
+;   tools\
+;       uia-click-third-edit-auto-count.ahk
 ;   UIA-v2\
 ;       Lib\
 ;           UIA.ahk
 ;           UIA_Browser.ahk
-#Include "UIA-v2\Lib\UIA.ahk"
-#Include "UIA-v2\Lib\UIA_Browser.ahk"
+#Include "..\UIA-v2\Lib\UIA.ahk"
+#Include "..\UIA-v2\Lib\UIA_Browser.ahk"
 
 TARGET_EDIT_INDEX := 3
 SEARCH_TIMEOUT_MS := 7000
@@ -432,7 +433,12 @@ DumpAccessibilityTree() {
             LastDocument := browser.GetCurrentDocumentElement()
         }
 
-        dumpPath := A_ScriptDir "\go-b2b-accessibility-tree.txt"
+        dumpDir := A_ScriptDir "\..\debug"
+
+        if !DirExist(dumpDir)
+            DirCreate(dumpDir)
+
+        dumpPath := dumpDir "\go-b2b-accessibility-tree.txt"
 
         if FileExist(dumpPath)
             FileDelete(dumpPath)

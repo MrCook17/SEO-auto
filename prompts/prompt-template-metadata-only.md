@@ -5,7 +5,7 @@ Use:
 - `cromartie_colour_glaze_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_colour_glaze_product_page_seo_strategy_workbook_aligned.md`
 - `cromartie_colour_glaze_keyword_map_clean_final_reference.xlsx` where useful for keyword ownership, department hierarchy and cannibalisation checks
-- `cromartie_colour_glaze_product_page_recurring_fixes_v2.md` if available, especially for naming, metadata and image SEO rules
+- `cromartie_colour_glaze_product_page_recurring_fixes_v15.md` if available, especially for naming, metadata and image SEO rules
 
 Metadata-only mode:
 
@@ -88,11 +88,30 @@ Meta title rules:
 
 Meta description rules:
 
-- Summarise the exact product and useful buying context.
-- Avoid unsupported claims.
-- Do not include product codes, SKUs or item codes by default because the CMS/product template already displays product codes.
-- Keep it under 160 characters where possible.
-- Avoid repeating the same thing for every product in a department, try and make them unique
+- Write a product-specific search snippet that helps a customer understand why this exact item is relevant and worth clicking; do not merely restate the product name.
+- Include a clear exact-product identifier naturally, normally the colour plus the range or product type, so the description cannot be mistaken for a generic range or department description.
+- Choose one main value angle from the strongest verified facts for this product. Suitable angles include colour tone, visible or verified fired effect, finish, application method, firing range, surface suitability, decorating purpose, palette building, detail work, colour testing or another supported buying reason.
+- Build the sentence around that one angle. Do not cram every supplied product fact into the description; detailed technical information belongs on the product page.
+- Vary the opening, sentence structure, emphasis and ending across similar products. Do not reuse a formula and change only the colour, size or product name.
+- Do not default to `Shop`. Where natural, vary action-led openings such as `Add`, `Create`, `Choose`, `Use`, `Explore`, `Discover`, `Find` or `Build your palette with`. Starting with the colour, effect, use or product type is also acceptable when it is stronger.
+- Use no more than one CTA or action-led phrase. Do not stack commands such as `Shop`, `discover`, `explore` and `buy` in one description.
+- Include one modest, factual reason to click where supported, such as controlled brushwork, building a fired palette, colour testing, adding surface interest or creating kiln-fired decoration.
+- Use a relevant search-intent phrase only when it accurately fits the exact product, such as `fired ceramic colour`, `pottery colour`, `ceramic decorating colour`, `underglaze colour`, `ceramic glaze colour`, `kiln-fired colour` or `fired decoration for ceramics`. Do not combine several near-duplicates or use a broad phrase as the page's main target.
+- Include the size only when it helps distinguish the variant or supports the buying decision. Do not force it into every description.
+- Do not include product codes, SKUs or item codes by default because the CMS/product template already displays them.
+- Avoid unsupported or generic filler such as `perfect`, `ideal`, `versatile`, `premium`, `professional-quality`, `stunning`, `must-have`, `easy to use`, `reliable`, `vibrant` or `rich` unless the wording is directly supported by the supplied facts or visible result.
+- Do not mention price, offers, stock, availability, delivery, popularity, `best-selling` status or superiority unless directly supplied and explicitly required.
+- Aim for roughly 140–155 characters where practical and remain under 160 characters where possible. Prioritise one natural, complete sentence and never end with a cut-off phrase.
+- Treat the current meta description as context, not a structure to copy. Improve weak or generic wording rather than lightly paraphrasing it.
+- If other products or descriptions from the same range are available in the supplied sources or conversation, compare them before finalising. Rewrite this description if it substantially repeats another description's opening, sentence structure, value phrase and ending.
+
+Before finalising the automation output, silently check the meta description and revise it if any answer is `yes`:
+
+1. Could the same description be used for another colour variant by changing only the colour name?
+2. Does it read like a list of keywords or product facts rather than useful customer-facing copy?
+3. Does it repeat the current description or a nearby range description's formula?
+4. Does it contain an unsupported fact, subjective claim or generic sales filler?
+5. Is the exact product unclear, is the sentence incomplete, or is it over 160 characters?
 
 Image SEO rules:
 
@@ -115,6 +134,7 @@ Only return the following visible sections before the automation block:
 
 - Keyword ownership followed:
 - Cannibalisation avoided by:
+- Meta-description angle used:
 - Content facts used:
 - Any uncertainty:
 

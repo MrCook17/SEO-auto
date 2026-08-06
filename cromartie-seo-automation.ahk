@@ -16,14 +16,14 @@ CoordMode "Mouse", "Screen"
 ; - Copies product name from Overview.
 ; - Copies meta title, meta description and HTML from Description.
 ; - Allows meta title, meta description and HTML fields to be blank.
-; - Builds the ChatGPT prompt from prompt-template.md.
+; - Builds the ChatGPT prompt from prompts\prompt-template.md.
 ; - Uses a temporary hardcoded public URL instead of the GO B2B CMS URL.
 ; - Pastes the prompt into ChatGPT.
 ; - Tries to copy one or more high-quality product images from the CMS Images tab and paste them into ChatGPT.
 ; - Stops before sending so the image attachment can be checked manually.
 ; - Extracts ChatGPT's automation block from the clipboard.
 ; - Pastes generated SEO fields into GO B2B.
-; - Clicks the main product Save button after all fields are pasted in full mode only.
+; - Clicks the main product Save button after all fields are pasted in full, metadata and image-only modes.
 ; - Automatically clicks the Image Details Save button after each image SEO field set is pasted, because GO B2B requires it to leave the image details page.
 ; - Can optionally paste ChatGPT's recommended product name with Ctrl + Alt + N.
 ; - Uses popups only for errors or blocking validation warnings.
@@ -46,20 +46,23 @@ chatgptWinTitle := "Colour & Glaze"
 ; "image" = image SEO for one ordinary product
 ; "matrix_image" = image SEO for every child of one matrix product
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
-SeoAutomationMode := "matrix_full"
+SeoAutomationMode := "metadata"
 
-FullPromptTemplatePath := A_ScriptDir "\prompt-template.md"
-MetadataPromptTemplatePath := A_ScriptDir "\prompt-template-metadata-only.md"
-ImageOnlyPromptTemplatePath := A_ScriptDir "\prompt-template-image-only.md"
-MatrixImagePromptTemplatePath := A_ScriptDir "\prompt-template-matrix-image.md"
-MatrixFullPromptTemplatePath := A_ScriptDir "\prompt-template-matrix-full.md"
+promptDir := A_ScriptDir "\prompts"
+FullPromptTemplatePath := promptDir "\prompt-template.md"
+MetadataPromptTemplatePath := promptDir "\prompt-template-metadata-only.md"
+ImageOnlyPromptTemplatePath := promptDir "\prompt-template-image-only.md"
+MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
+MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
 logDir := A_ScriptDir "\logs"
 backupDir := A_ScriptDir "\backups"
-matrixStateFilePath := A_ScriptDir "\matrix-image-state.txt"
-matrixFullStateFilePath := A_ScriptDir "\matrix-full-state.txt"
+stateDir := A_ScriptDir "\state"
+debugDir := A_ScriptDir "\debug"
+matrixStateFilePath := stateDir "\matrix-image-state.txt"
+matrixFullStateFilePath := stateDir "\matrix-full-state.txt"
 matrixNavigationDelayMs := 4000
 matrixReturnDelayMs := 3000
 matrixFullyReopenParentAfterReturn := true
@@ -78,7 +81,7 @@ global LastDocument := 0
 
 ; Temporary hardcoded public product/category URL for {PAGE_URL} in the ChatGPT prompt.
 ; This avoids using the GO B2B CMS edit URL.
-hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes/..."
+hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Botz-Unidekor-Glazes/..."
 
 ; Try to copy/paste the product image into ChatGPT after the prompt is pasted.
 ; The script still stops before sending so you can confirm the image attached correctly.
@@ -131,11 +134,11 @@ chatPasteRetries := 3
 chatWakeDelayMs := 900
 chatPasteVerifyDelayMs := 900
 
-; Coordinates from config-notes.md
+; Coordinates from docs\config-notes.md
 coords := Map(
     ; Initial CMS page
-    ; "product_edit_button", [1437, 310],
-    "product_edit_button", [1483, 310], ; x: 1483, y: 310
+    "product_edit_button", [1437, 310],
+    ; "product_edit_button", [1483, 310], ; x: 1483, y: 310
     ; Product page tabs/buttons
     "overview_tab", [288, 260],
     "description_tab", [378, 261],
@@ -273,10 +276,14 @@ OpenProductBuildPromptAndPasteToChatGPT() {
         ; Do not copy the browser URL here because the active page is a GO B2B CMS URL.
         pageUrl := hardcodedPageUrl
 
-        if IsAnyMatrixMode()
-            throw Error("NumpadEnter is not used for matrix modes. Open the matrix parent and press Numpad4.")
+        if IsMatrixImageMode()
+            throw Error("NumpadEnter is not used for matrix-image mode. Open the matrix parent and press Numpad4.")
+
         ClickPoint("product_edit_button", 1500)
-        BuildPromptFromCurrentProductPage(pageUrl)
+        if IsMatrixFullMode()
+            BuildMatrixFullPrompt(pageUrl)
+        else
+            BuildPromptFromCurrentProductPage(pageUrl)
     } catch as err {
         MsgBox "OpenProductBuildPromptAndPasteToChatGPT failed:`n`n" err.Message
     }
@@ -1044,13 +1051,15 @@ PasteCopiedChatGPTOutputToCms() {
         ; Images tab: open each image details page and paste image metadata
         InsertImageSeoFields(imageTitles, imageAlts)
 
-        ; Save the ordinary full and image-only workflows after every
-        ; requested image record has been updated.
-        if IsFullMode() || IsImageOnlyMode()
+        ; Save every ordinary workflow after all metadata and requested image
+        ; records have been updated.
+        if IsFullMode() || IsMetadataOnlyMode() || IsImageOnlyMode()
             ClickPoint("product_save_button", 1000)
 
         if IsFullMode()
             Flash("SEO fields pasted and product saved.")
+        else if IsMetadataOnlyMode()
+            Flash("Metadata and image SEO fields pasted and product saved.")
         else if IsImageOnlyMode()
             Flash("Image SEO fields pasted and product saved.")
         else
@@ -1311,11 +1320,61 @@ CopySelectedText(timeout := 2, allowBlank := false) {
 }
 
 PasteToPoint(name, text) {
-    ClickPoint(name, 200)
-    Sleep 150
-    Send "^a"
-    Sleep 150
-    PasteText(text)
+    maxAttempts := 5
+    lastActual := ""
+    lastProblem := ""
+
+    Loop maxAttempts {
+        attempt := A_Index
+        ClickPoint(name, 200)
+        Sleep 150
+        Send "^a"
+        Sleep 150
+        PasteText(text)
+        Sleep 250
+
+        try {
+            ; Select and copy the value back from the same CMS control. Optional
+            ; copying is required because an intentionally cleared field does
+            ; not place text on the clipboard.
+            lastActual := CopyOptionalFromPoint(name)
+            if NormalisePastedFieldValue(lastActual) = NormalisePastedFieldValue(text) {
+                if attempt > 1
+                    LogText("paste-verification", "Field '" name "' verified on attempt " attempt ".")
+                return true
+            }
+            lastProblem := "read-back value did not match"
+            LogText(
+                "paste-verification-mismatch",
+                "Field: " name
+                . "`nAttempt: " attempt " of " maxAttempts
+                . "`nExpected:`n" text
+                . "`nActual:`n" lastActual
+            )
+        } catch as err {
+            lastProblem := "could not read the field back: " err.Message
+            LogText("paste-verification-error", "Field '" name "', attempt " attempt " of " maxAttempts ": " err.Message)
+        }
+
+        if attempt < maxAttempts {
+            ToolTip "Paste verification failed for " name ".`nRetrying " (attempt + 1) " of " maxAttempts "..."
+            Sleep 350
+        }
+    }
+
+    ToolTip()
+    throw Error(
+        "Could not verify the pasted value in '" name "' after " maxAttempts " attempts."
+        . "`n`nLast problem: " lastProblem
+        . "`n`nProcessing stopped before continuing to another CMS field."
+    )
+}
+
+NormalisePastedFieldValue(value) {
+    ; Windows clipboard text can represent the same textarea content with CRLF
+    ; or LF line endings. No other characters or whitespace are ignored.
+    value := StrReplace(value, "`r`n", "`n")
+    return StrReplace(value, "`r", "`n")
 }
 
 PasteText(text) {
@@ -1326,6 +1385,7 @@ PasteText(text) {
     if text = "" {
         Send "{Backspace}"
         Sleep 250
+        A_Clipboard := savedClip
         return
     }
 
@@ -1415,13 +1475,19 @@ EmptyToNA(text) {
 }
 
 EnsureFolders() {
-    global logDir, backupDir
+    global logDir, backupDir, stateDir, debugDir
 
     if !DirExist(logDir)
         DirCreate logDir
 
     if !DirExist(backupDir)
         DirCreate backupDir
+
+    if !DirExist(stateDir)
+        DirCreate stateDir
+
+    if !DirExist(debugDir)
+        DirCreate debugDir
 }
 
 LogText(prefix, text) {
@@ -1711,7 +1777,11 @@ BuildMatrixImagePrompt(pageUrl) {
     parentImageCount := DetectAndSetImageCountFromImagesTab()
     if parentImageCount
         TryCopyCmsImagesToChatGPT(false)
-    ClickPoint("matrix_skus_tab", 1000)
+    ; Visiting the parent Images tab can leave Chromium's matrix-SKU UIA tree
+    ; stale. Close and reopen the complete parent before the first SKU scan so
+    ; ReacquireMatrixSkuControls reads a newly built accessibility tree.
+    ActivateWindow(cmsWinTitle)
+    FullyReopenActiveMatrixParent()
     initial := ReacquireMatrixSkuControls(0)
     productCount := initial["buttons"].Length
     products := []
@@ -1795,7 +1865,10 @@ BuildMatrixFullPrompt(pageUrl) {
     parentImageCount := DetectAndSetImageCountFromImagesTab()
     if parentImageCount
         TryCopyCmsImagesToChatGPT(false)
-    ClickPoint("matrix_skus_tab", 1000)
+    ; Rebuild the parent after inspecting its Images tab. The reopen helper
+    ; returns on a fresh Matrix SKUs tab, ready for the first UIA lookup.
+    ActivateWindow(cmsWinTitle)
+    FullyReopenActiveMatrixParent()
     controls := ReacquireMatrixSkuControls(0)
     productCount := controls["buttons"].Length
     products := []
@@ -1803,7 +1876,8 @@ BuildMatrixFullPrompt(pageUrl) {
         p := A_Index
         rowText := NormaliseMatrixRowText(controls["buttons"][p].RowText)
         exactName := ExtractMatrixProductNameFromRow(rowText, p)
-        products.Push(Map("index", p, "productName", exactName, "variantContext", ExtractMatrixVariantFromRow(rowText, exactName), "skuRowText", rowText, "originalHtmlSnippet", "", "imageCount", 0))
+        connectedSize := ExtractConnectedMatrixSkuSize(rowText)
+        products.Push(Map("index", p, "productName", exactName, "connectedSize", connectedSize, "variantContext", ExtractMatrixVariantFromRow(rowText, exactName), "skuRowText", rowText, "originalHtmlSnippet", "", "imageCount", 0))
     }
 
     ; Visit every child separately. As in matrix_image, fully close and reopen
@@ -1824,7 +1898,7 @@ BuildMatrixFullPrompt(pageUrl) {
         if products[p]["imageCount"]
             TryCopyCmsImagesToChatGPT(false)
         ActivateWindow(cmsWinTitle)
-        LogText("matrix_full-child-context", "Product " p ": " products[p]["productName"] "`nVariant: " products[p]["variantContext"] "`nSKU row: " products[p]["skuRowText"] "`nHTML:`n" products[p]["originalHtmlSnippet"])
+        LogText("matrix_full-child-context", "Product " p ": " products[p]["productName"] "`nConnected SKU size: " products[p]["connectedSize"] "`nVariant: " products[p]["variantContext"] "`nSKU row: " products[p]["skuRowText"] "`nHTML:`n" products[p]["originalHtmlSnippet"])
         ClickPoint("matrix_child_cancel_button", 300)
         WaitForMatrixSkuPage(p, productCount)
     }
@@ -1852,7 +1926,7 @@ BuildMatrixFullPromptFromState(template, pageUrl, metaTitle, metaDescription, st
     for p, product in state["products"] {
         imageCount := product["imageCount"]
         imageSummary := imageCount = 0 ? "No images are configured for this product." : "Attached images: Product " p " Image 1 through Product " p " Image " imageCount
-        productsText .= "Product " p ":`nExact child product name (audit identifier): " product["productName"] "`nVariant context: " product["variantContext"] "`nFull SKU row context: " EmptyToNA(product["skuRowText"]) "`nCurrent child HTML/product description snippet:`n" bt bt bt "html`n" product["originalHtmlSnippet"] "`n" bt bt bt "`n" imageSummary "`n`n"
+        productsText .= "Product " p ":`nExact child product name (audit identifier): " product["productName"] "`nConnected SKU size (from the same accessibility row): " EmptyToNA(product["connectedSize"]) "`nVariant context: " product["variantContext"] "`nFull SKU row context: " EmptyToNA(product["skuRowText"]) "`nCurrent child HTML/product description snippet:`n" bt bt bt "html`n" product["originalHtmlSnippet"] "`n" bt bt bt "`n" imageSummary "`n`n"
         outputFields .= "PRODUCT_" p "_NAME:`n[exact original child name unchanged]`n`nPRODUCT_" p "_IMAGE_COUNT:`n" imageCount "`n`nPRODUCT_" p "_HTML_SNIPPET:`n" bt bt bt "html`n[complete multiline child HTML]`n" bt bt bt "`n`n"
         Loop imageCount {
             i := A_Index, attachment += 1
@@ -1957,7 +2031,6 @@ PasteMatrixFullOutputToCms() {
     ; field is changed. Save and fully reopen the exact parent before opening
     ; Matrix SKUs, using the same recovery path as child return transitions.
     FullyReopenActiveMatrixParent()
-    ClickPoint("matrix_skus_tab", 1000)
 
     Loop state["productCount"] {
         p := A_Index
@@ -1972,6 +2045,11 @@ PasteMatrixFullOutputToCms() {
             childImageCount := state["products"][p]["imageCount"]
             DetectAndSetImageCountFromImagesTab(childImageCount)
             ClickPoint("description_tab", 600)
+            ; Child matrix SKUs must inherit metadata from the parent matrix
+            ; page. Explicitly clear any legacy child-level metadata before
+            ; replacing the child's HTML description.
+            PasteToPoint("meta_title", "")
+            PasteToPoint("meta_description", "")
             PasteToPoint("html_snippet", output["products"][p]["htmlSnippet"])
             Loop childImageCount {
                 i := A_Index
@@ -1980,7 +2058,7 @@ PasteMatrixFullOutputToCms() {
             }
             ClickPoint("matrix_child_save_button", 300)
             WaitForMatrixSkuPage(p, state["productCount"])
-            LogText("matrix_full-update", "Product " p ": " state["products"][p]["productName"] "; HTML and " childImageCount " image record(s) updated.")
+            LogText("matrix_full-update", "Product " p ": " state["products"][p]["productName"] "; child metadata cleared, HTML and " childImageCount " image record(s) updated.")
         } catch as err {
             LogText("matrix_full-error", "Product " p " ('" state["products"][p]["productName"] "'): " err.Message)
             throw Error("Matrix-full product " p " of " state["productCount"] " ('" state["products"][p]["productName"] "'):`n" err.Message "`n`nProcessing stopped to avoid updating the wrong child.")
@@ -2031,7 +2109,6 @@ PasteMatrixImageOutputToCms() {
     ; Saving/reopening also guarantees a fresh matrix accessibility tree after
     ; parent-image detail edits.
     FullyReopenActiveMatrixParent()
-    ClickPoint("matrix_skus_tab", 1000)
     ; Scan once at the start of the insertion stage. This validates the child
     ; count and stores fresh screen coordinates, but no UIA lookup is performed
     ; after any child Save transition.
@@ -2071,11 +2148,12 @@ SaveMatrixState(state) {
     if mode != "matrix_image" && mode != "matrix_full"
         throw Error("Cannot save unsupported matrix state mode '" mode "'.")
     filePath := mode = "matrix_full" ? matrixFullStateFilePath : matrixStateFilePath
-    text := mode = "matrix_full" ? "CROMARTIE_MATRIX_FULL_STATE_V2`nmode`tmatrix_full`n" : "CROMARTIE_MATRIX_STATE_V2`n"
+    text := mode = "matrix_full" ? "CROMARTIE_MATRIX_FULL_STATE_V3`nmode`tmatrix_full`n" : "CROMARTIE_MATRIX_STATE_V3`n"
     text .= "parent`t" EncodeStateValue(state["parentProductName"]) "`n"
     text .= "count`t" state["productCount"] "`nparent_images`t" state["parentImageCount"] "`n"
     for _, product in state["products"] {
-        text .= "product`t" product["index"] "`t" product["imageCount"] "`t" EncodeStateValue(product["productName"]) "`t" EncodeStateValue(product["variantContext"]) "`t" EncodeStateValue(product["skuRowText"])
+        connectedSize := product.Has("connectedSize") ? product["connectedSize"] : ExtractConnectedMatrixSkuSize(product["skuRowText"])
+        text .= "product`t" product["index"] "`t" product["imageCount"] "`t" EncodeStateValue(product["productName"]) "`t" EncodeStateValue(connectedSize) "`t" EncodeStateValue(product["variantContext"]) "`t" EncodeStateValue(product["skuRowText"])
         if mode = "matrix_full"
             text .= "`t" EncodeStateValue(product["originalHtmlSnippet"])
         text .= "`n"
@@ -2095,7 +2173,7 @@ LoadMatrixState(requestedMode := "") {
     if mode = "matrix_image" && matrixState
         return matrixState
     filePath := mode = "matrix_full" ? matrixFullStateFilePath : matrixStateFilePath
-    expectedHeader := mode = "matrix_full" ? "CROMARTIE_MATRIX_FULL_STATE_V2" : "CROMARTIE_MATRIX_STATE_V2"
+    expectedHeader := mode = "matrix_full" ? "CROMARTIE_MATRIX_FULL_STATE_V3" : "CROMARTIE_MATRIX_STATE_V3"
     if !FileExist(filePath)
         throw Error("No saved " mode " state exists. Build its matrix prompt with Numpad4 first.")
     lines := StrSplit(StrReplace(FileRead(filePath, "UTF-8"), "`r", ""), "`n")
@@ -2115,12 +2193,12 @@ LoadMatrixState(requestedMode := "") {
             case "count": count := Integer(parts[2])
             case "parent_images": parentImages := Integer(parts[2])
             case "product":
-                expectedParts := mode = "matrix_full" ? 7 : 6
+                expectedParts := mode = "matrix_full" ? 8 : 7
                 if parts.Length != expectedParts
                     throw Error("A product record in the matrix state file is invalid.")
-                product := Map("index", Integer(parts[2]), "imageCount", Integer(parts[3]), "productName", DecodeStateValue(parts[4]), "variantContext", DecodeStateValue(parts[5]), "skuRowText", DecodeStateValue(parts[6]))
+                product := Map("index", Integer(parts[2]), "imageCount", Integer(parts[3]), "productName", DecodeStateValue(parts[4]), "connectedSize", DecodeStateValue(parts[5]), "variantContext", DecodeStateValue(parts[6]), "skuRowText", DecodeStateValue(parts[7]))
                 if mode = "matrix_full"
-                    product["originalHtmlSnippet"] := DecodeStateValue(parts[7])
+                    product["originalHtmlSnippet"] := DecodeStateValue(parts[8])
                 products.Push(product)
         }
     }
@@ -2271,7 +2349,10 @@ GetUniqueVisibleEditLocations(scope) {
             isSkuRow := RegExMatch(rowText, "i)\bName\b") && RegExMatch(rowText, "i)\bStock\s*Code\b|\bStockCode\b")
             if isSkuRow
                 hasSkuRows := true
-            item := { Name: element.Name, ExactEditName: exactEditName, IsSkuRow: isSkuRow, ControlType: GetUiaControlTypeText(element), X: Round(rect.x), Y: Round(rect.y), W: Round(rect.w), H: Round(rect.h), CentreX: Round(rect.x + rect.w / 2), CentreY: Round(rect.y + rect.h / 2), RowText: rowText }
+            connectedSize := isSkuRow ? FindConnectedMatrixSkuSizeByGeometry(scope, element) : ""
+            if connectedSize != "" && ExtractConnectedMatrixSkuSize(rowText) = "Not separately exposed in the SKU accessibility row"
+                rowText := connectedSize " " rowText
+            item := { Name: element.Name, ExactEditName: exactEditName, IsSkuRow: isSkuRow, ConnectedSize: connectedSize, ControlType: GetUiaControlTypeText(element), X: Round(rect.x), Y: Round(rect.y), W: Round(rect.w), H: Round(rect.h), CentreX: Round(rect.x + rect.w / 2), CentreY: Round(rect.y + rect.h / 2), RowText: rowText }
             candidates.Push(item)
         }
     }
@@ -2303,6 +2384,80 @@ GetUniqueVisibleEditLocations(scope) {
     return unique
 }
 
+FindConnectedMatrixSkuSizeByGeometry(scope, editElement) {
+    cardRect := 0
+    node := editElement
+    Loop 8 {
+        try node := UIA.TreeWalkerTrue.GetParentElement(node)
+        catch
+            break
+        if !node
+            break
+        try nodeName := NormaliseMatrixRowText(node.Name)
+        catch
+            continue
+        if !RegExMatch(nodeName, "i)\bName\b") || !RegExMatch(nodeName, "i)\bStock\s*Code\b|\bStockCode\b")
+            continue
+        try rect := node.Location
+        catch
+            continue
+        if rect.w > 0 && rect.h > 0 {
+            cardRect := rect
+            break
+        }
+    }
+    if !cardRect
+        return ""
+
+    candidates := []
+    for _, typeName in ["Text", "DataItem", "Custom"] {
+        try elements := scope.FindElements({ Type: typeName })
+        catch
+            continue
+        for _, element in elements {
+            try {
+                if element.IsOffscreen
+                    continue
+                name := NormaliseMatrixRowText(element.Name)
+                if !IsPlausibleConnectedSkuSize(name)
+                    continue
+                rect := element.Location
+                if rect.w <= 0 || rect.h <= 0
+                    continue
+                centreX := rect.x + rect.w / 2
+                centreY := rect.y + rect.h / 2
+                ; The size must sit to the left of the Name/StockCode card and
+                ; vertically inside that exact card's row.
+                if centreX >= cardRect.x + 3
+                    continue
+                if centreY < cardRect.y - 3 || centreY > cardRect.y + cardRect.h + 3
+                    continue
+                distance := Abs(cardRect.x - (rect.x + rect.w))
+                candidates.Push({ Name: name, Distance: distance, X: rect.x })
+            }
+        }
+    }
+    if candidates.Length = 0
+        return ""
+
+    best := candidates[1]
+    for _, candidate in candidates {
+        if candidate.Distance < best.Distance
+            best := candidate
+    }
+    return best.Name
+}
+
+IsPlausibleConnectedSkuSize(value) {
+    value := Trim(value)
+    if value = "" || RegExMatch(value, "i)^(Size|Name|Edit|Remove|Skus?)\s*:?\s*$")
+        return false
+    ; Connected values are commonly capacities/dimensions, but retain other
+    ; concise matrix variants (such as named sizes) when they occupy the
+    ; verified left-hand cell.
+    return StrLen(value) <= 80 && !RegExMatch(value, "i)\bStock\s*Code\b|\bStockCode\b")
+}
+
 GetEditRowContext(element) {
     node := element, best := ""
     Loop 8 {
@@ -2321,11 +2476,57 @@ GetEditRowContext(element) {
         ; SKU record. Return it immediately instead of continuing upwards into
         ; the whole SKU table or matrix modal.
         if RegExMatch(cleanedName, "i)\bName\b") && RegExMatch(cleanedName, "i)\bStock\s*Code\b|\bStockCode\b")
-            return cleanedName
+            return ExpandMatrixSkuRowContext(node, cleanedName)
         if best = ""
             best := cleanedName
     }
     return best
+}
+
+ExpandMatrixSkuRowContext(skuNode, baseText) {
+    ; The nearest named ancestor normally represents the right-hand SKU card
+    ; (Name/StockCode/Edit), while its parent row also contains the connected
+    ; left-hand Size cell. Walk only a few levels and accept a broader name
+    ; only while it still contains exactly one SKU identity. This prevents a
+    ; table containing several SKUs from being mistaken for one product row.
+    best := RegExReplace(baseText, "[\r\n\t]+", " ")
+    node := skuNode
+    Loop 4 {
+        try node := UIA.TreeWalkerTrue.GetParentElement(node)
+        catch
+            break
+        if !node
+            break
+        try candidate := RegExReplace(Trim(node.Name), "[\r\n\t]+", " ")
+        catch
+            continue
+        if candidate = "" || InStr(candidate, "Editing Matrix Product:")
+            continue
+        if CountMatrixSkuIdentities(candidate) != 1
+            continue
+        if GetMatrixSkuRowKey(candidate) != GetMatrixSkuRowKey(best)
+            continue
+        ; Prefer the first single-SKU ancestor that adds text before "Name";
+        ; that prefix is the connected Size/Colour/Variant cell.
+        if RegExMatch(candidate, "i)^(.+?)\s+Name\s*:?", &prefixMatch) {
+            prefix := Trim(prefixMatch[1])
+            prefix := Trim(RegExReplace(prefix, "i)^(Size|Colour|Color|Variant)\s*:?\s*", ""))
+            if prefix != "" {
+                best := candidate
+                break
+            }
+        }
+    }
+    return best
+}
+
+CountMatrixSkuIdentities(text) {
+    count := 0, pos := 1
+    while RegExMatch(text, "i)\b(?:Stock\s*Code|StockCode)\s*:", &match, pos) {
+        count += 1
+        pos := match.Pos(0) + match.Len(0)
+    }
+    return count
 }
 
 CollectAllMatrixSkuButtons(scope) {
@@ -2575,6 +2776,19 @@ ExtractMatrixProductNameFromRow(rowText, productIndex) {
     throw Error("Could not extract the exact product name from accessibility row " productIndex ".`n`nRow text: " rowText "`n`nPress F8 to inspect the detected rows.")
 }
 
+ExtractConnectedMatrixSkuSize(rowText) {
+    text := NormaliseMatrixRowText(rowText)
+    ; A connected value is exposed before the row's Name field, for example:
+    ; "236ml (8oz) Name Electric Celadon Green ... StockCode: C626SM".
+    if RegExMatch(text, "i)^(.+?)(?=\s+Name\s*:?)", &match) {
+        size := Trim(match[1])
+        size := Trim(RegExReplace(size, "i)^(Size)\s*:?\s*", ""))
+        if size != ""
+            return size
+    }
+    return "Not separately exposed in the SKU accessibility row"
+}
+
 ExtractMatrixVariantFromRow(rowText, productName) {
     text := NormaliseMatrixRowText(rowText)
     if RegExMatch(text, "i)^(.+?)(?=\s+Name\s*:)", &match) {
@@ -2811,8 +3025,10 @@ NormaliseCatalogueProductName(value) {
 
 BuildLocationsMessage(items) {
     output := ""
-    for index, item in items
-        output .= index ". " item.Name " | type=" item.ControlType " | rect=" item.X "," item.Y " " item.W "x" item.H " | centre=" item.CentreX "," item.CentreY " | row=" item.RowText "`n"
+    for index, item in items {
+        connectedSize := item.HasOwnProp("ConnectedSize") ? item.ConnectedSize : ""
+        output .= index ". " item.Name " | size=" (connectedSize = "" ? "[not detected]" : connectedSize) " | type=" item.ControlType " | rect=" item.X "," item.Y " " item.W "x" item.H " | centre=" item.CentreX "," item.CentreY " | row=" item.RowText "`n"
+    }
     return output = "" ? "No Edit controls recorded." : output
 }
 
@@ -2822,15 +3038,25 @@ ShowLastLocations() {
 }
 
 DumpAccessibilityTree() {
-    global LastDocument
+    global LastDocument, cmsWinTitle, debugDir
     try {
+        ; F9 may be pressed while ChatGPT or the script's own message box was
+        ; most recently active. UIA_Browser searches the active browser, so
+        ; explicitly activate the configured GO b2b CMS window first.
+        ActivateWindow(cmsWinTitle, 500)
+        LastDocument := 0
         LastDocument := UIA_Browser().GetCurrentDocumentElement()
-        path := A_ScriptDir "\go-b2b-accessibility-tree.txt"
+        if !DirExist(debugDir)
+            DirCreate debugDir
+        path := debugDir "\go-b2b-accessibility-tree.txt"
         if FileExist(path)
             FileDelete path
+        ToolTip "Creating accessibility-tree dump..."
         FileAppend LastDocument.DumpAll(), path, "UTF-8"
+        ToolTip()
         MsgBox "Accessibility tree saved to:`n" path
     } catch as err {
+        ToolTip()
         MsgBox "Accessibility-tree dump failed:`n`n" err.Message
     }
 }

@@ -1,0 +1,7 @@
+﻿CROMARTIE_MATRIX_FULL_STATE_V3
+mode	matrix_full
+parent	Crocus Red - C6 Pro Series Stoneware Glaze (Liquid)
+count	2
+parent_images	1
+product	1	2	Crocus Red - C6 Pro Series Stoneware Glaze 236ml	236ml (8oz)	Not separately available; see product name	236ml (8oz) Name Crocus Red - C6 Pro Series Stoneware Glaze 236ml StockCode: C69SW	C69 Crocus Red Cone 6 Professional Stoneware Glaze.%0D%0A%0D%0ACone 6 Professional Series Crocus Red Glaze is an opaque glaze with rich red hues that can go from burgundy to apple. When fired to cone 7 or held at peak temperature, this glaze will get flecks of purple and flame orange colours. It also interacts with other glazes beautifully. We recommend applying by dipping or spraying, but brushing will also work. If brushing, consider adding a bit of brushing medium to the glaze first.%0D%0A%0D%0A<p>%0D%0A    <strong>%0D%0A      For a thicker finish, add %0D%0A      <a href="https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes/Powder-Gum-Arabic-PD-GUMA" target="_blank" rel="noopener noreferrer">%0D%0A        Powder Gum Arabic%0D%0A      </a>%0D%0A      as required.%0D%0A    </strong>%0D%0A  </p>
+product	2	0	CROCUS RED	473ml (Pint)	Not separately available; see product name	473ml (Pint) Name CROCUS RED StockCode: C69P	

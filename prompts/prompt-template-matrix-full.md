@@ -18,7 +18,7 @@ Total attached images: {{TOTAL_IMAGE_COUNT}}
 
 The parent matrix page owns the parent product name and parent metadata. Create one parent product-name recommendation, one parent meta title and one parent meta description. Do not create parent HTML: the automation will not replace it.
 
-Every child needs its own complete CMS-ready HTML/product-description snippet and image title plus alt text for every attached child image. The parent also needs title and alt text for every attached parent image. Child names are exact audit identifiers: echo each unchanged. Do not create child product-name recommendations or child metadata because the automation will not paste them.
+Every child needs its own complete CMS-ready HTML/product-description snippet and image title plus alt text for every attached child image. The parent also needs title and alt text for every attached parent image. Child names are exact audit identifiers: echo each unchanged. Do not create child product-name recommendations or child metadata: the automation clears child meta titles and meta descriptions so metadata is owned by the parent matrix page.
 
 Products in stable CMS order:
 
@@ -44,11 +44,12 @@ Fired results can vary depending on clay body, application thickness, layering a
 
 Manually recommended internal links:
 
-C6 Pro Series Stoneware Glazes (Liquid) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes) and C6 Pro Series Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes) and any other inlinks that may exist which are relevant
+C6 Pro Series Stoneware Glazes (Liquid) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes) and C6 Pro Series Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes) or Powder Gum Arabic (for thickening glaze) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes/Powder-Gum-Arabic-PD-GUMA) and any other inlinks that may exist which are relevant
 
 Accuracy and SEO requirements:
 
 - Treat each child as an independent exact product. Never copy a size, colour, shape, capacity, specification or other fact from one child to another unless it is independently verified for both.
+- Treat each child's connected SKU size as verified structured data for that child only. Preserve both metric and imperial wording when supplied, and use it naturally in that child's HTML/specifications where relevant. Never infer another child's size from it.
 - Use UK English and natural, useful wording. Do not invent facts, applications, dimensions, finishes, materials, firing details, safety claims, compatibility or suitability.
 - Keep the parent meta title under 60 characters where practical and its meta description under 160 characters where practical.
 - Each child HTML snippet must use flexible Cromartie inline-CSS structure, include one useful `<h2>`, natural paragraphs, and a practical `<ul>` where useful.

@@ -33,17 +33,18 @@ Current HTML/product description snippet:
 ```
 
 Required internal links:
-C6 Pro Series Stoneware Glazes (Liquid) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes) and C6 Pro Series Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes) and any other inlinks that may exist which are relevant
+Milton Bridge Stoneware Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Stoneware-Glazes) and Fired Colour (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes)
 
 Image notes:
 {{IMAGE_NOTES}}
 
 Additional product notes:
-Glaze type: liquid cone 6 stoneware glaze
-Firing: cone 6, around 1230°C
-Application: suitable for dipping and layering
-Clay bodies: suitable for porcelain and stoneware pieces
-Finish: atmospheric mid-fire glaze effects with colour depth and surface variation
+Recommended firing temperature: 1240–1280°C / Cone 7–9
+Liquid option: 250ml ready-mixed brush-on glaze
+Dry option: 1kg and 25kg powdered glaze
+Dry mixing guidance: 1 part powder, 0.75 part water and 0.5 part medium
+Application: stir well and brush on up to 3 coats, allowing suitable drying between coats
+Use: suitable for functional tableware and decorative ceramic finishes when fired as directed
 
 Fired results can vary depending on clay body, application thickness, layering and kiln conditions. Use test tiles to compare results before applying a new glaze or combination across a full batch of work.
 
