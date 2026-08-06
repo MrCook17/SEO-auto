@@ -1,0 +1,20 @@
+{
+  "overview": {
+    "earthenwareFilter": "#productgroup input[name=\"productgroup\"][value=\"1\"]",
+    "earthenwareLabelCount": "#countProductgroup_1",
+    "resultCount": "#filterresultsCount",
+    "resultsContainer": "#filterresults",
+    "productLinks": "#filterresults a[href*=\"productoverview\"][href*=\"productno\"]"
+  },
+  "product": {
+    "heading": ".content.product-details h1",
+    "detailsContainer": ".content.product-details",
+    "sectionHeadings": "h2, h3, h4",
+    "imageRoot": ".left-content.product-details",
+    "imageAreas": [
+      ".left-content.product-details .flexslider .slides",
+      ".left-content.product-details .flex-control-thumbs"
+    ],
+    "fallbackImage": "meta[property=\"og:image\"]"
+  }
+}
