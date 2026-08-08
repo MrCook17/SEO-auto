@@ -20,7 +20,7 @@ CoordMode "Mouse", "Screen"
 ; - Uses a temporary hardcoded public URL instead of the GO B2B CMS URL.
 ; - Pastes the prompt into ChatGPT.
 ; - Tries to copy one or more high-quality product images from the CMS Images tab and paste them into ChatGPT.
-; - Stops before sending so the image attachment can be checked manually.
+; - Stops before sending in ordinary and matrix modes; BOTZ submits after its attachment timer.
 ; - Extracts ChatGPT's automation block from the clipboard.
 ; - Pastes generated SEO fields into GO B2B.
 ; - Clicks the main product Save button after all fields are pasted in full, metadata and image-only modes.
@@ -46,7 +46,8 @@ chatgptWinTitle := "Colour & Glaze"
 ; "image" = image SEO for one ordinary product
 ; "matrix_image" = image SEO for every child of one matrix product
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
-SeoAutomationMode := "metadata"
+; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
+SeoAutomationMode := "botz"
 
 promptDir := A_ScriptDir "\prompts"
 FullPromptTemplatePath := promptDir "\prompt-template.md"
@@ -54,6 +55,7 @@ MetadataPromptTemplatePath := promptDir "\prompt-template-metadata-only.md"
 ImageOnlyPromptTemplatePath := promptDir "\prompt-template-image-only.md"
 MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
 MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
+BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
@@ -63,6 +65,15 @@ stateDir := A_ScriptDir "\state"
 debugDir := A_ScriptDir "\debug"
 matrixStateFilePath := stateDir "\matrix-image-state.txt"
 matrixFullStateFilePath := stateDir "\matrix-full-state.txt"
+botzStateFilePath := stateDir "\botz-product-state.txt"
+botzPromptSettingsFilePath := stateDir "\botz-prompt-settings.txt"
+botzRootDir := "C:\BOTZ"
+botzFilePickerTimeoutMs := 10000
+botzChatPickerFolderLoadMs := 2500
+botzChatPickerSelectAllMs := 1500
+botzChatAttachmentSettleMs := 10000
+botzImagesTabLoadMs := 1500
+botzImageDetailsLoadMs := 2500
 matrixNavigationDelayMs := 4000
 matrixReturnDelayMs := 3000
 matrixFullyReopenParentAfterReturn := true
@@ -75,13 +86,18 @@ matrixMaxScrollSteps := 30
 matrixNoNewRowsStopCount := 3
 global matrixState := 0
 global matrixFullState := 0
+global botzState := 0
+global botzPromptSettings := 0
+global botzPromptSettingsGui := 0
 global activeMatrixParentProductName := ""
+global activeCmsProductCode := ""
 global LastEditButtons := []
 global LastDocument := 0
 
-; Temporary hardcoded public product/category URL for {PAGE_URL} in the ChatGPT prompt.
-; This avoids using the GO B2B CMS edit URL.
-hardcodedPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Botz-Unidekor-Glazes/..."
+; Public product/category URL for {PAGE_URL} in the ChatGPT prompt. BOTZ mode
+; loads the saved value from state\botz-prompt-settings.txt at startup.
+botzDefaultPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Botz-Earthenware-Glazes-800ml/..."
+hardcodedPageUrl := botzDefaultPageUrl
 
 ; Try to copy/paste the product image into ChatGPT after the prompt is pasted.
 ; The script still stops before sending so you can confirm the image attached correctly.
@@ -149,6 +165,7 @@ coords := Map(
     "matrix_child_save_button", [1630, 996],
     ; Overview tab
     "product_name", [923, 374],
+    "stock_code", [456, 484],
     ; Description tab
     "meta_title", [874, 383],
     "html_snippet", [876, 553],
@@ -156,17 +173,23 @@ coords := Map(
     ; Images tab
     "image", [399, 454],
     "image_details_button", [319, 555],
+    "image_add_button", [307, 343],
     ; Image details page
+    "image_name", [945, 555],
     "image_title", [921, 620],
     "image_alt", [948, 684],
     "image_save_button", [1250, 734],
     ; ChatGPT
-    "chat_input", [2323, 1018]
+    "chat_input", [2323, 1018],
+    "chat_add_button", [2246, 1026],
+    "chat_add_attachments_button", [2393, 566]
     ; "chat_input", [2102, 972] ; x: 2102, y: 972
 )
 
 requiredInternalLinksDefault := "N/A"
 additionalProductNotesDefault := "N/A"
+
+InitialiseBotzPromptSettings()
 
 ; ==========================================================
 ; HOTKEYS
@@ -181,6 +204,7 @@ NumpadEnter:: OpenProductBuildPromptAndPasteToChatGPT()
 Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!i:: TryCopyCmsImagesToChatGPT()
 ^!n:: ToggleRecommendedProductName()
+^+NumLock:: OpenBotzPromptSettingsGui()
 ^0:: SetImageCountToProcess(0)
 ^1:: SetImageCountToProcess(1)
 ^2:: SetImageCountToProcess(2)
@@ -280,7 +304,9 @@ OpenProductBuildPromptAndPasteToChatGPT() {
             throw Error("NumpadEnter is not used for matrix-image mode. Open the matrix parent and press Numpad4.")
 
         ClickPoint("product_edit_button", 1500)
-        if IsMatrixFullMode()
+        if IsBotzMode()
+            BuildBotzPrompt(pageUrl)
+        else if IsMatrixFullMode()
             BuildMatrixFullPrompt(pageUrl)
         else
             BuildPromptFromCurrentProductPage(pageUrl)
@@ -303,7 +329,9 @@ BuildPromptFromOpenProductPageAndPasteToChatGPT() {
         ; Use the temporary hardcoded public URL for {{PAGE_URL}}.
         ; Do not copy the browser URL here because the active page is a GO B2B CMS URL.
         pageUrl := hardcodedPageUrl
-        if IsMatrixFullMode()
+        if IsBotzMode()
+            BuildBotzPrompt(pageUrl)
+        else if IsMatrixFullMode()
             BuildMatrixFullPrompt(pageUrl)
         else if IsMatrixImageMode()
             BuildMatrixImagePrompt(pageUrl)
@@ -324,11 +352,13 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     global attemptImageCopyAfterPrompt, imageCountToProcess
 
     ValidateSeoAutomationMode()
+    ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ValidateImageTargetConfig()
 
-    ; Overview tab: product name
+    ; Overview tab: exact GO b2b identity and product name
     ClickPoint("overview_tab", 500)
+    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     productName := CopyFromPoint("product_name")
 
     ; Description tab: meta and HTML fields
@@ -395,8 +425,8 @@ ValidateSeoAutomationMode() {
     global SeoAutomationMode
     mode := GetSeoAutomationMode()
 
-    if mode != "full" && mode != "metadata" && mode != "image" && mode != "matrix_image" && mode != "matrix_full" {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image' or 'matrix_full'.")
+    if mode != "full" && mode != "metadata" && mode != "image" && mode != "matrix_image" && mode != "matrix_full" && mode != "botz" {
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full' or 'botz'.")
     }
 }
 
@@ -425,12 +455,16 @@ IsMatrixFullMode() {
     return GetSeoAutomationMode() = "matrix_full"
 }
 
+IsBotzMode() {
+    return GetSeoAutomationMode() = "botz"
+}
+
 IsAnyMatrixMode() {
     return IsMatrixImageMode() || IsMatrixFullMode()
 }
 
 GetPromptTemplatePath() {
-    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath
+    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath, BotzPromptTemplatePath
 
     ValidateSeoAutomationMode()
 
@@ -444,6 +478,8 @@ GetPromptTemplatePath() {
         return MatrixImagePromptTemplatePath
     if IsMatrixFullMode()
         return MatrixFullPromptTemplatePath
+    if IsBotzMode()
+        return BotzPromptTemplatePath
 
     return FullPromptTemplatePath
 }
@@ -503,12 +539,16 @@ EnsurePromptSupportsImageCount(prompt, imageCount) {
     return prompt
 }
 
-BuildAutomationImageOutputBlock(imageCount) {
+BuildAutomationImageOutputBlock(imageCount, includeImageNames := false) {
     block := ""
 
     Loop imageCount {
         i := A_Index
 
+        if includeImageNames {
+            block .= "IMAGE_" i "_NAME:`n"
+            block .= "[clean CMS image name, not a filename, title or alt text]`n`n"
+        }
         block .= "IMAGE_" i "_TITLE:`n"
         block .= "[exact image " i " title only]`n`n"
         block .= "IMAGE_" i "_ALT:`n"
@@ -988,6 +1028,12 @@ PasteCopiedChatGPTOutputToCms() {
     try {
         EnsureFolders()
         ValidateSeoAutomationMode()
+
+        if IsBotzMode() {
+            PasteBotzOutputToCms()
+            return
+        }
+
         ValidateImageTargetConfig()
 
         if IsMatrixFullMode() {
@@ -1001,6 +1047,9 @@ PasteCopiedChatGPTOutputToCms() {
         }
 
         ActivateWindow(cmsWinTitle)
+        ClearActiveCmsProductCode()
+        ClickPoint("overview_tab", 500)
+        SetActiveCmsProductCode(CopyFromPoint("stock_code"))
         DetectAndSetImageCountFromImagesTab()
 
         response := A_Clipboard
@@ -1074,27 +1123,33 @@ PasteCopiedChatGPTOutputToCms() {
 ; ==========================================================
 
 ParseAutomationOutput(block, imageCount, metadataOnly := false) {
+    hasImageNames := imageCount > 0 && InStr(block, "IMAGE_1_NAME:")
+    firstImageLabel := imageCount > 0 ? "IMAGE_1_" (hasImageNames ? "NAME:" : "TITLE:") : ""
     productNameRecommendation := ExtractLabel(block, "PRODUCT_NAME_RECOMMENDATION:", "META_TITLE:")
     metaTitle := ExtractLabel(block, "META_TITLE:", "META_DESCRIPTION:")
 
     if metadataOnly {
-        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", "IMAGE_1_TITLE:")
+        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", firstImageLabel)
         htmlSnippet := ""
     } else {
         metaDescription := ExtractLabel(block, "META_DESCRIPTION:", "HTML_SNIPPET:")
-        htmlSnippet := ExtractLabel(block, "HTML_SNIPPET:", "IMAGE_1_TITLE:")
+        htmlSnippet := ExtractLabel(block, "HTML_SNIPPET:", firstImageLabel)
         htmlSnippet := StripCodeFence(htmlSnippet)
     }
 
+    imageNames := []
     imageTitles := []
     imageAlts := []
 
     Loop imageCount {
         i := A_Index
-        nextImageTitleLabel := i < imageCount ? "IMAGE_" (i + 1) "_TITLE:" : ""
+        nextImageLabel := i < imageCount ? "IMAGE_" (i + 1) (hasImageNames ? "_NAME:" : "_TITLE:") : ""
+
+        if hasImageNames
+            imageNames.Push(ExtractLabel(block, "IMAGE_" i "_NAME:", "IMAGE_" i "_TITLE:"))
 
         imageTitles.Push(ExtractLabel(block, "IMAGE_" i "_TITLE:", "IMAGE_" i "_ALT:"))
-        imageAlts.Push(ExtractLabel(block, "IMAGE_" i "_ALT:", nextImageTitleLabel))
+        imageAlts.Push(ExtractLabel(block, "IMAGE_" i "_ALT:", nextImageLabel))
     }
 
     return Map(
@@ -1102,6 +1157,7 @@ ParseAutomationOutput(block, imageCount, metadataOnly := false) {
         "metaTitle", metaTitle,
         "metaDescription", metaDescription,
         "htmlSnippet", htmlSnippet,
+        "imageNames", imageNames,
         "imageTitles", imageTitles,
         "imageAlts", imageAlts
     )
@@ -1120,15 +1176,16 @@ InsertMetaFields(metaTitle, metaDescription, htmlSnippet := "") {
     ClickPoint("description_tab", 600)
     PasteToPoint("meta_title", metaTitle)
 
-    if IsFullMode()
+    if IsFullMode() || IsBotzMode()
         PasteToPoint("html_snippet", htmlSnippet)
 
     PasteToPoint("meta_description", metaDescription)
 }
 
-InsertImageSeoFields(imageTitles, imageAlts) {
+InsertImageSeoFields(imageTitles, imageAlts, imageNames := 0) {
     Loop imageTitles.Length {
-        PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index])
+        imageName := imageNames && imageNames.Length >= A_Index ? imageNames[A_Index] : ""
+        PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index], imageName)
     }
 }
 
@@ -1136,12 +1193,14 @@ InsertImageSeoFields(imageTitles, imageAlts) {
 ; IMAGE METADATA PASTE HELPERS
 ; ==========================================================
 
-PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt) {
+PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt, imageName := "") {
     global imageTabLoadDelayMs
     target := GetImageTarget(imageIndex)
 
     ClickPoint("images_tab", imageTabLoadDelayMs)
     ClickCoordinates(target["details_button"], 1000)
+    if imageName != ""
+        PasteToPoint("image_name", imageName)
     PasteToPoint("image_title", imageTitle)
     PasteToPoint("image_alt", imageAlt)
 
@@ -1469,6 +1528,44 @@ CleanText(text) {
     return Trim(text, " `t`r`n")
 }
 
+ClearActiveCmsProductCode() {
+    global activeCmsProductCode
+    activeCmsProductCode := ""
+}
+
+SetActiveCmsProductCode(productCode) {
+    global activeCmsProductCode
+    productCode := CleanText(productCode)
+    if productCode = ""
+        throw Error("The GO b2b product code is blank, so product-specific logs and backups cannot be named safely.")
+    activeCmsProductCode := productCode
+    return productCode
+}
+
+HasActiveCmsProductCode() {
+    global activeCmsProductCode
+    return CleanText(activeCmsProductCode) != ""
+}
+
+GetActiveCmsProductCodeFilePart() {
+    global activeCmsProductCode
+    productCode := CleanText(activeCmsProductCode)
+    if productCode = ""
+        throw Error("The exact GO b2b product code has not been collected, so a log or backup cannot be created.")
+
+    ; Preserve the exact CMS value unless Windows forbids one of its characters
+    ; in a filename. Normal GO b2b stock codes such as B91018 are unchanged.
+    filePart := RegExReplace(productCode, "[<>:`"/\\|?*\x00-\x1F]", "_")
+    filePart := RTrim(filePart, " .")
+    if filePart = ""
+        throw Error("The GO b2b product code cannot be represented in a Windows filename: " productCode)
+    return filePart
+}
+
+BuildRunArtifactFileName(prefix, timestamp) {
+    return GetSeoAutomationMode() "-" GetActiveCmsProductCodeFilePart() "-" prefix "-" timestamp ".txt"
+}
+
 EmptyToNA(text) {
     text := CleanText(text)
     return text = "" ? "N/A" : text
@@ -1494,7 +1591,7 @@ LogText(prefix, text) {
     global logDir
 
     timestamp := FormatTime(, "yyyyMMdd-HHmmss")
-    filePath := logDir "\" GetSeoAutomationMode() "-" prefix "-" timestamp ".txt"
+    filePath := logDir "\" BuildRunArtifactFileName(prefix, timestamp)
     FileAppend text, filePath, "UTF-8"
 }
 
@@ -1502,8 +1599,1065 @@ BackupText(prefix, text) {
     global backupDir
 
     timestamp := FormatTime(, "yyyyMMdd-HHmmss")
-    filePath := backupDir "\" prefix "-" timestamp ".txt"
+    filePath := backupDir "\" BuildRunArtifactFileName(prefix, timestamp)
     FileAppend text, filePath, "UTF-8"
+}
+
+; ==========================================================
+; BOTZ PROMPT SETTINGS
+; ==========================================================
+
+InitialiseBotzPromptSettings() {
+    global botzPromptSettings, hardcodedPageUrl, botzPromptSettingsFilePath
+
+    if !IsBotzMode() {
+        botzPromptSettings := CreateDefaultBotzPromptSettings()
+        return
+    }
+
+    try {
+        botzPromptSettings := LoadBotzPromptSettings()
+        hardcodedPageUrl := botzPromptSettings["pageUrl"]
+    } catch as err {
+        botzPromptSettings := CreateDefaultBotzPromptSettings()
+        hardcodedPageUrl := botzPromptSettings["pageUrl"]
+        MsgBox "The saved BOTZ prompt settings could not be loaded, so the built-in defaults are being used.`n`nFile: " botzPromptSettingsFilePath "`n`n" err.Message
+    }
+}
+
+CreateDefaultBotzPromptSettings() {
+    global botzDefaultPageUrl
+
+    return Map(
+        "pageUrl", botzDefaultPageUrl,
+        "inlink1Name", "",
+        "inlink1Url", "",
+        "inlink2Name", "",
+        "inlink2Url", "",
+        "inlinkExtra", "",
+        "additionalNotes", ""
+    )
+}
+
+OpenBotzPromptSettingsGui() {
+    global botzPromptSettings, botzPromptSettingsGui
+
+    if !IsBotzMode() {
+        MsgBox "BOTZ prompt settings are available only while SeoAutomationMode is set to 'botz'."
+        return
+    }
+
+    if IsObject(botzPromptSettingsGui) {
+        try {
+            botzPromptSettingsGui.Show()
+            return
+        } catch {
+            botzPromptSettingsGui := 0
+        }
+    }
+
+    if !IsObject(botzPromptSettings)
+        botzPromptSettings := CreateDefaultBotzPromptSettings()
+
+    settingsGui := Gui("+AlwaysOnTop +OwnDialogs", "BOTZ Prompt Settings")
+    settingsGui.MarginX := 16
+    settingsGui.MarginY := 14
+    settingsGui.SetFont("s10", "Segoe UI")
+
+    controls := Map()
+    settingsGui.AddText("xm", "Cromartie page URL (hardcodedPageUrl)")
+    controls["pageUrl"] := settingsGui.AddEdit("xm y+4 w700", botzPromptSettings["pageUrl"])
+
+    settingsGui.SetFont("s10 Bold")
+    settingsGui.AddText("xm y+16", "Recommended internal links")
+    settingsGui.SetFont("s9 Norm")
+    settingsGui.AddText("xm y+6 w220", "Inlink name")
+    settingsGui.AddText("x+12 yp w468", "Inlink URL")
+
+    controls["inlink1Name"] := settingsGui.AddEdit("xm y+4 w220", botzPromptSettings["inlink1Name"])
+    controls["inlink1Url"] := settingsGui.AddEdit("x+12 yp w468", botzPromptSettings["inlink1Url"])
+    controls["inlink2Name"] := settingsGui.AddEdit("xm y+8 w220", botzPromptSettings["inlink2Name"])
+    controls["inlink2Url"] := settingsGui.AddEdit("x+12 yp w468", botzPromptSettings["inlink2Url"])
+
+    settingsGui.AddText("xm y+14", "Extra inlink information")
+    controls["inlinkExtra"] := settingsGui.AddEdit("xm y+4 w700 r3", botzPromptSettings["inlinkExtra"])
+
+    settingsGui.AddText("xm y+14", "Additional notes")
+    controls["additionalNotes"] := settingsGui.AddEdit("xm y+4 w700 r4", botzPromptSettings["additionalNotes"])
+
+    saveButton := settingsGui.AddButton("xm y+16 w100 Default", "Save")
+    cancelButton := settingsGui.AddButton("x+10 yp w100", "Cancel")
+    saveButton.OnEvent("Click", SaveBotzPromptSettingsFromGui.Bind(settingsGui, controls))
+    cancelButton.OnEvent("Click", CloseBotzPromptSettingsGui.Bind(settingsGui))
+    settingsGui.OnEvent("Close", CloseBotzPromptSettingsGui)
+    settingsGui.OnEvent("Escape", CloseBotzPromptSettingsGui)
+
+    botzPromptSettingsGui := settingsGui
+    settingsGui.Show("AutoSize Center")
+    controls["pageUrl"].Focus()
+}
+
+SaveBotzPromptSettingsFromGui(settingsGui, controls, *) {
+    global botzPromptSettings, hardcodedPageUrl
+
+    settings := Map(
+        "pageUrl", Trim(controls["pageUrl"].Value),
+        "inlink1Name", Trim(controls["inlink1Name"].Value),
+        "inlink1Url", Trim(controls["inlink1Url"].Value),
+        "inlink2Name", Trim(controls["inlink2Name"].Value),
+        "inlink2Url", Trim(controls["inlink2Url"].Value),
+        "inlinkExtra", Trim(controls["inlinkExtra"].Value),
+        "additionalNotes", Trim(controls["additionalNotes"].Value)
+    )
+
+    try {
+        ValidateBotzPromptSettings(settings)
+        SaveBotzPromptSettings(settings)
+        botzPromptSettings := settings
+        hardcodedPageUrl := settings["pageUrl"]
+        CloseBotzPromptSettingsGui(settingsGui)
+        Flash("BOTZ prompt settings saved.", 2000)
+    } catch as err {
+        MsgBox "BOTZ prompt settings were not saved.`n`n" err.Message
+    }
+}
+
+CloseBotzPromptSettingsGui(settingsGui, *) {
+    global botzPromptSettingsGui
+
+    try settingsGui.Destroy()
+    botzPromptSettingsGui := 0
+}
+
+ValidateBotzPromptSettings(settings) {
+    if settings["pageUrl"] = ""
+        throw Error("The hardcodedPageUrl box cannot be blank.")
+    if !IsBotzHttpUrl(settings["pageUrl"])
+        throw Error("hardcodedPageUrl must be a complete http:// or https:// URL without spaces.")
+
+    Loop 2 {
+        index := A_Index
+        name := settings["inlink" index "Name"]
+        url := settings["inlink" index "Url"]
+        if (name = "") != (url = "")
+            throw Error("Inlink row " index " must have both a name and a URL, or both boxes must be blank.")
+        if url != "" && !IsBotzHttpUrl(url)
+            throw Error("Inlink row " index " must use a complete http:// or https:// URL without spaces.")
+    }
+}
+
+IsBotzHttpUrl(value) {
+    return RegExMatch(value, "i)^https?://[^\s]+$")
+}
+
+SaveBotzPromptSettings(settings) {
+    global botzPromptSettingsFilePath
+
+    ValidateBotzPromptSettings(settings)
+    EnsureFolders()
+    text := "CROMARTIE_BOTZ_PROMPT_SETTINGS_V1`n"
+    text .= "page_url`t" EncodeStateValue(settings["pageUrl"]) "`n"
+    text .= "inlink_1_name`t" EncodeStateValue(settings["inlink1Name"]) "`n"
+    text .= "inlink_1_url`t" EncodeStateValue(settings["inlink1Url"]) "`n"
+    text .= "inlink_2_name`t" EncodeStateValue(settings["inlink2Name"]) "`n"
+    text .= "inlink_2_url`t" EncodeStateValue(settings["inlink2Url"]) "`n"
+    text .= "inlink_extra`t" EncodeStateValue(settings["inlinkExtra"]) "`n"
+    text .= "additional_notes`t" EncodeStateValue(settings["additionalNotes"]) "`n"
+
+    temporaryPath := botzPromptSettingsFilePath ".tmp"
+    if FileExist(temporaryPath)
+        FileDelete temporaryPath
+    FileAppend text, temporaryPath, "UTF-8"
+    FileMove temporaryPath, botzPromptSettingsFilePath, 1
+}
+
+LoadBotzPromptSettings() {
+    global botzPromptSettingsFilePath
+
+    if !FileExist(botzPromptSettingsFilePath)
+        return CreateDefaultBotzPromptSettings()
+
+    lines := StrSplit(StrReplace(FileRead(botzPromptSettingsFilePath, "UTF-8"), "`r", ""), "`n")
+    if lines.Length < 8 || lines[1] != "CROMARTIE_BOTZ_PROMPT_SETTINGS_V1"
+        throw Error("The BOTZ prompt settings file is invalid or unsupported.")
+
+    values := Map()
+    Loop lines.Length - 1 {
+        line := lines[A_Index + 1]
+        if line = ""
+            continue
+        parts := StrSplit(line, "`t")
+        if parts.Length != 2
+            throw Error("The BOTZ prompt settings file contains an invalid record.")
+        values[parts[1]] := DecodeStateValue(parts[2])
+    }
+
+    fieldMap := Map(
+        "page_url", "pageUrl",
+        "inlink_1_name", "inlink1Name",
+        "inlink_1_url", "inlink1Url",
+        "inlink_2_name", "inlink2Name",
+        "inlink_2_url", "inlink2Url",
+        "inlink_extra", "inlinkExtra",
+        "additional_notes", "additionalNotes"
+    )
+    settings := Map()
+    for fileKey, settingKey in fieldMap {
+        if !values.Has(fileKey)
+            throw Error("The BOTZ prompt settings file is missing: " fileKey ".")
+        settings[settingKey] := values[fileKey]
+    }
+    ValidateBotzPromptSettings(settings)
+    return settings
+}
+
+BuildBotzRecommendedInlinks(settings) {
+    sections := []
+    Loop 2 {
+        index := A_Index
+        name := settings["inlink" index "Name"]
+        url := settings["inlink" index "Url"]
+        if name != ""
+            sections.Push("Inlink " index ":`nName: " name "`nURL: " url)
+    }
+    if settings["inlinkExtra"] != ""
+        sections.Push("Extra inlink information:`n" settings["inlinkExtra"])
+    if sections.Length = 0
+        return "NONE"
+
+    text := ""
+    for _, section in sections
+        text .= (text = "" ? "" : "`n`n") section
+    return text
+}
+
+; ==========================================================
+; BOTZ PRODUCT CREATION
+; ==========================================================
+
+BuildBotzPrompt(pageUrl) {
+    global cmsWinTitle, BotzPromptTemplatePath, botzState, botzPromptSettings
+
+    try {
+        ClearActiveCmsProductCode()
+        ActivateWindow(cmsWinTitle)
+        ClickPoint("overview_tab", 500)
+        stockCode := SetActiveCmsProductCode(CopyFromPoint("stock_code"))
+        productName := CleanText(CopyFromPoint("product_name"))
+        if productName = ""
+            throw Error("The GO b2b product name is blank.")
+
+        matchCode := TransformBotzStockCode(stockCode)
+        productFolder := FindUniqueBotzProductFolder(matchCode)
+        productMdPath := productFolder "\product.md"
+        imagesDir := productFolder "\images"
+        if !FileExist(productMdPath)
+            throw Error("The matched BOTZ folder has no product.md file: " productMdPath)
+        if !DirExist(imagesDir)
+            throw Error("The matched BOTZ folder has no images folder: " imagesDir)
+
+        productMd := FileRead(productMdPath, "UTF-8")
+        if CleanText(productMd) = ""
+            throw Error("The matched product.md file is empty: " productMdPath)
+
+        ; This scan deliberately happens immediately before request creation.
+        ; product.md image lists are never read or trusted by the automation.
+        imageFiles := EnumerateBotzImageFiles(imagesDir)
+        if imageFiles.Length = 0
+            throw Error("The matched BOTZ images folder contains no supported image files: " imagesDir)
+        imageManifest := BuildBotzImageManifest(imageFiles)
+
+        if !FileExist(BotzPromptTemplatePath)
+            throw Error("The BOTZ prompt template was not found: " BotzPromptTemplatePath)
+        if !IsObject(botzPromptSettings)
+            InitialiseBotzPromptSettings()
+        prompt := BuildBotzPromptFromSource(
+            FileRead(BotzPromptTemplatePath, "UTF-8"),
+            pageUrl,
+            productName,
+            productMd,
+            imageFiles,
+            botzPromptSettings
+        )
+
+        botzState := Map(
+            "mode", "botz",
+            "productName", productName,
+            "stockCode", stockCode,
+            "matchCode", matchCode,
+            "productFolder", productFolder,
+            "productMdPath", productMdPath,
+            "productMdSize", FileGetSize(productMdPath),
+            "productMdModified", FileGetTime(productMdPath, "M"),
+            "initialGalleryCount", 0,
+            "uploadedCount", 0,
+            "pendingImageIndex", 0,
+            "imageCount", imageFiles.Length,
+            "images", imageFiles,
+            "imageManifest", imageManifest
+        )
+        SaveBotzState(botzState)
+
+        LogText("botz-source", BuildBotzSourceLog(botzState))
+        LogText("botz-chatgpt-request", prompt)
+        PastePromptToChatGPT(prompt)
+        ValidateBotzSourcesUnchanged(botzState)
+        AttachBotzImagesToChatGpt(imageFiles)
+        Flash("BOTZ prompt and " imageFiles.Length " image attachment(s) were submitted to ChatGPT.", 3000)
+    } catch as err {
+        if HasActiveCmsProductCode() {
+            LogText("botz-error", "Prompt build stopped: " err.Message)
+            LogText("botz-skipped-product", "BOTZ product was not requested or changed: " err.Message)
+        }
+        throw
+    }
+}
+
+TransformBotzStockCode(stockCode) {
+    stockCode := CleanText(stockCode)
+    LogText("botz-stock-code", "GO b2b stock code: " stockCode)
+    if !RegExMatch(stockCode, "^[A-Za-z][0-9]{2,}$")
+        throw Error("Invalid GO b2b stock code '" stockCode "'. Expected one leading letter followed by digits, similar to B91018.")
+
+    matchCode := SubStr(stockCode, 2, StrLen(stockCode) - 2)
+    if !RegExMatch(matchCode, "^[0-9]+$")
+        throw Error("Removing the first and final stock-code characters did not produce a numeric BOTZ folder code.")
+    LogText("botz-match-code", "Stock code " stockCode " transformed to exact folder code " matchCode ".")
+    return matchCode
+}
+
+FindUniqueBotzProductFolder(matchCode) {
+    global botzRootDir
+    if !DirExist(botzRootDir)
+        throw Error("BOTZ source root was not found: " botzRootDir)
+
+    prefix := matchCode " "
+    matches := []
+    Loop Files botzRootDir "\*", "D" {
+        if SubStr(A_LoopFileName, 1, StrLen(prefix)) = prefix
+            matches.Push(A_LoopFileFullPath)
+    }
+
+    if matches.Length = 0
+        throw Error("No BOTZ folder begins with the exact numeric prefix '" prefix "' under " botzRootDir ".")
+    if matches.Length > 1 {
+        matchList := ""
+        for _, path in matches
+            matchList .= (matchList = "" ? "" : "`n") path
+        throw Error("Multiple BOTZ folders begin with the exact numeric prefix '" prefix "':`n" matchList)
+    }
+
+    LogText("botz-folder-match", "Exact prefix '" prefix "' matched: " matches[1])
+    return matches[1]
+}
+
+EnumerateBotzImageFiles(imagesDir) {
+    files := []
+    Loop Files imagesDir "\*", "F" {
+        if RegExMatch(A_LoopFileName, "i)\.(jpe?g|png|webp)$")
+            files.Push(A_LoopFileFullPath)
+    }
+    NaturalSortBotzPaths(files)
+    return files
+}
+
+BuildBotzImageManifest(imageFiles) {
+    manifest := []
+    for _, imagePath in imageFiles {
+        manifest.Push(Map(
+            "path", imagePath,
+            "size", FileGetSize(imagePath),
+            "modified", FileGetTime(imagePath, "M")
+        ))
+    }
+    return manifest
+}
+
+NaturalSortBotzPaths(paths) {
+    Loop paths.Length {
+        i := A_Index
+        if i = 1
+            continue
+        current := paths[i]
+        j := i - 1
+        while j >= 1 && CompareBotzPathsNaturally(paths[j], current) > 0 {
+            paths[j + 1] := paths[j]
+            j -= 1
+        }
+        paths[j + 1] := current
+    }
+    return paths
+}
+
+CompareBotzPathsNaturally(pathA, pathB) {
+    SplitPath pathA, &nameA
+    SplitPath pathB, &nameB
+    result := DllCall("Shlwapi.dll\StrCmpLogicalW", "Str", nameA, "Str", nameB, "Int")
+    return result != 0 ? result : StrCompare(pathA, pathB, false)
+}
+
+BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0) {
+    if !IsObject(promptSettings)
+        promptSettings := CreateDefaultBotzPromptSettings()
+
+    requiredMarkers := [
+        "{{PAGE_URL}}",
+        "{{PRODUCT_NAME}}",
+        "{{PRODUCT_MD_CONTENT}}",
+        "{{IMAGE_COUNT}}",
+        "{{IMAGE_ORDER}}",
+        "{{RECOMMENDED_INLINKS}}",
+        "{{ADDITIONAL_NOTES}}",
+        "{{IMAGE_AUTOMATION_OUTPUT_FIELDS}}"
+    ]
+    for _, marker in requiredMarkers {
+        if !InStr(template, marker)
+            throw Error("The BOTZ prompt template is missing the required marker " marker ".")
+    }
+
+    imageOrder := ""
+    Loop imageFiles.Length {
+        SplitPath imageFiles[A_Index], &fileName
+        imageOrder .= "Image " A_Index " of " imageFiles.Length ": " fileName "`n"
+    }
+
+    outputFields := BuildAutomationImageOutputBlock(imageFiles.Length, true)
+    replacements := Map(
+        "{{PAGE_URL}}", CleanText(pageUrl),
+        "{{PRODUCT_NAME}}", productName,
+        "{{PRODUCT_MD_CONTENT}}", productMd,
+        "{{IMAGE_COUNT}}", imageFiles.Length,
+        "{{IMAGE_ORDER}}", Trim(imageOrder),
+        "{{RECOMMENDED_INLINKS}}", BuildBotzRecommendedInlinks(promptSettings),
+        "{{ADDITIONAL_NOTES}}", promptSettings["additionalNotes"] != "" ? promptSettings["additionalNotes"] : "NONE",
+        "{{IMAGE_AUTOMATION_OUTPUT_FIELDS}}", outputFields
+    )
+    prompt := template
+    for marker, value in replacements
+        prompt := StrReplace(prompt, marker, value)
+    return prompt
+}
+
+BuildBotzSourceLog(state) {
+    text := "Product name: " state["productName"]
+    text .= "`nGO b2b stock code: " state["stockCode"]
+    text .= "`nTransformed matching code: " state["matchCode"]
+    text .= "`nMatched BOTZ folder: " state["productFolder"]
+    text .= "`nproduct.md path: " state["productMdPath"]
+    text .= "`nDiscovered image count: " state["imageCount"]
+    for index, imagePath in state["images"]
+        text .= "`nImage " index ": " imagePath
+    return text
+}
+
+AttachBotzImagesToChatGpt(imageFiles) {
+    if imageFiles.Length = 0
+        throw Error("No BOTZ images were supplied for ChatGPT attachment.")
+
+    SplitPath imageFiles[1], , &imagesDir
+    ValidateBotzCtrlAImageFolder(imagesDir, imageFiles)
+
+    existingAttachments := []
+    Loop imageFiles.Length {
+        SplitPath imageFiles[A_Index], &fileName
+        if ChatGptDraftHasAttachment(fileName)
+            existingAttachments.Push(fileName)
+    }
+    if existingAttachments.Length {
+        names := ""
+        for _, fileName in existingAttachments
+            names .= (names = "" ? "" : ", ") fileName
+        throw Error("The ChatGPT draft already contains BOTZ attachment(s): " names ". Clear the draft attachments before retrying the Ctrl+A batch.")
+    }
+
+    selectionAttempted := false
+    try {
+        ToolTip "Opening ChatGPT attachments for " imageFiles.Length " BOTZ images..."
+        OpenChatGptFilePicker()
+        selectionAttempted := true
+        ChooseAllBotzImagesInPicker(imagesDir)
+        verifiedCount := WaitForBotzChatAttachmentBatch(imageFiles)
+        for index, imagePath in imageFiles
+            LogText("botz-chatgpt-attachment", "Ctrl+A batch submitted image " index " of " imageFiles.Length ": " imagePath)
+        LogText("botz-chatgpt-attachment", "Ctrl+A batch UIA verification: " verifiedCount " of " imageFiles.Length " filename(s) visible after settling.")
+        if verifiedCount != imageFiles.Length
+            LogText("botz-chatgpt-attachment-warning", "The picker submitted all files with Ctrl+A, but ChatGPT exposed only " verifiedCount " of " imageFiles.Length " filenames through UIA after settling. Automatic submission is still configured to proceed after the wait.")
+        SubmitBotzChatGptDraft()
+        ToolTip()
+        return true
+    } catch as err {
+        ToolTip()
+        Send "{Esc}"
+        LogText("botz-chatgpt-attachment-error", "Ctrl+A batch failed: " err.Message)
+        if selectionAttempted
+            throw Error("The ChatGPT Ctrl+A attachment selection started but did not complete safely. It was not retried, to avoid duplicates: " err.Message)
+        throw
+    }
+}
+
+ValidateBotzCtrlAImageFolder(imagesDir, imageFiles) {
+    expected := Map()
+    for _, imagePath in imageFiles
+        expected[StrLower(imagePath)] := true
+
+    foundCount := 0
+    Loop Files imagesDir "\*", "FD" {
+        if InStr(A_LoopFileAttrib, "D")
+            throw Error("The BOTZ images folder contains a subfolder, so Ctrl+A could select the wrong item: " A_LoopFileFullPath)
+        if !RegExMatch(A_LoopFileName, "i)\.(jpe?g|png|webp)$")
+            throw Error("The BOTZ images folder contains an unsupported file, so Ctrl+A was not used: " A_LoopFileFullPath)
+        if !expected.Has(StrLower(A_LoopFileFullPath))
+            throw Error("The BOTZ images folder changed before Ctrl+A selection: " A_LoopFileFullPath)
+        foundCount += 1
+    }
+    if foundCount != imageFiles.Length
+        throw Error("Ctrl+A folder validation found " foundCount " file(s), but the BOTZ request expects " imageFiles.Length ".")
+}
+
+OpenChatGptFilePicker() {
+    global chatgptWinTitle, botzFilePickerTimeoutMs
+    ActivateWindow(chatgptWinTitle, 500)
+    ClickPoint("chat_add_button", 900)
+    ClickPoint("chat_add_attachments_button", 700)
+    picker := WinWaitActive("ahk_class #32770", , botzFilePickerTimeoutMs / 1000)
+    if !picker
+        throw Error("The Windows file picker did not open after clicking ChatGPT + at 2246,1026 and Add attachments at 2317,395.")
+    return picker
+}
+
+ChooseSingleFileInPicker(filePath) {
+    if !FileExist(filePath)
+        throw Error("File picker source no longer exists: " filePath)
+    ChooseFileSelectionInPicker(filePath)
+}
+
+ChooseAllBotzImagesInPicker(imagesDir) {
+    global botzFilePickerTimeoutMs, botzChatPickerFolderLoadMs, botzChatPickerSelectAllMs
+    if !DirExist(imagesDir)
+        throw Error("BOTZ images folder no longer exists: " imagesDir)
+
+    picker := WinExist("A")
+    if !picker || !WinActive("ahk_class #32770")
+        throw Error("The Windows file picker is not active.")
+
+    savedClip := ClipboardAll()
+    try {
+        A_Clipboard := ""
+        A_Clipboard := imagesDir
+        if !ClipWait(2)
+            throw Error("The BOTZ images-folder path could not be placed on the clipboard.")
+
+        Send "^l"
+        Sleep 600
+        Send "^a"
+        Send "^v"
+        Sleep 600
+        Send "{Enter}"
+        ToolTip "Waiting for the BOTZ images folder to open..."
+        Sleep botzChatPickerFolderLoadMs
+
+        FocusWindowsFilePickerList(picker)
+        Sleep 700
+        Send "^a"
+        ToolTip "All BOTZ images selected.`nWaiting before confirming..."
+        Sleep botzChatPickerSelectAllMs
+        Send "{Enter}"
+
+        if !WinWaitClose("ahk_id " picker, , botzFilePickerTimeoutMs / 1000)
+            throw Error("The Windows file picker did not close after Ctrl+A and confirmation.")
+    } finally {
+        A_Clipboard := savedClip
+    }
+}
+
+FocusWindowsFilePickerList(picker) {
+    candidates := ["DirectUIHWND2", "DirectUIHWND1", "SysListView321", "SHELLDLL_DefView1"]
+    for _, controlName in candidates {
+        try {
+            if !ControlGetHwnd(controlName, "ahk_id " picker)
+                continue
+            ControlFocus controlName, "ahk_id " picker
+            return controlName
+        }
+    }
+    throw Error("The Windows file list could not be focused, so Ctrl+A was not sent.")
+}
+
+ChooseFileSelectionInPicker(selectionText) {
+    global botzFilePickerTimeoutMs
+    picker := WinExist("A")
+    if !picker || !WinActive("ahk_class #32770")
+        throw Error("The Windows file picker is not active.")
+
+    savedClip := ClipboardAll()
+    try {
+        A_Clipboard := ""
+        A_Clipboard := selectionText
+        if !ClipWait(2)
+            throw Error("The file selection could not be placed on the clipboard.")
+        Send "!n"
+        Sleep 250
+        Send "^a"
+        Send "^v"
+        Sleep 250
+        Send "{Enter}"
+        if !WinWaitClose("ahk_id " picker, , botzFilePickerTimeoutMs / 1000)
+            throw Error("The Windows file picker did not close after submitting the file selection.")
+    } finally {
+        A_Clipboard := savedClip
+    }
+}
+
+WaitForBotzChatAttachmentBatch(imageFiles) {
+    global chatgptWinTitle, botzChatAttachmentSettleMs
+    startedAt := A_TickCount
+    Loop {
+        elapsed := A_TickCount - startedAt
+        ToolTip "Waiting for ChatGPT to process " imageFiles.Length " attachments...`n" Round(elapsed / 1000, 1) " seconds"
+        if elapsed >= botzChatAttachmentSettleMs
+            break
+        Sleep 500
+    }
+
+    verifiedCount := 0
+    try {
+        ActivateWindow(chatgptWinTitle, 300)
+        document := UIA_Browser().GetCurrentDocumentElement()
+        for _, imagePath in imageFiles {
+            SplitPath imagePath, &fileName
+            if ChatGptDocumentHasAttachment(document, fileName)
+                verifiedCount += 1
+        }
+    }
+    return verifiedCount
+}
+
+SubmitBotzChatGptDraft() {
+    global chatgptWinTitle, botzChatAttachmentSettleMs
+    ToolTip "BOTZ attachments settled. Sending the ChatGPT request..."
+    ActivateWindow(chatgptWinTitle, 300)
+    FocusChatGptInputForPaste()
+    LogText("botz-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second BOTZ attachment timer.")
+    Send "{Enter}"
+}
+
+ChatGptDraftHasAttachment(fileName) {
+    global chatgptWinTitle
+    try {
+        ActivateWindow(chatgptWinTitle, 250)
+        document := UIA_Browser().GetCurrentDocumentElement()
+        return ChatGptDocumentHasAttachment(document, fileName)
+    }
+    return false
+}
+
+ChatGptDocumentHasAttachment(document, fileName) {
+    try elements := document.FindElements({ Name: fileName, mm: 2, cs: 0 })
+    catch
+        return false
+    for _, element in elements {
+        try {
+            exposedName := StrLower(Trim(element.Name))
+            fileNameLower := StrLower(fileName)
+            ; The prompt itself lists every filename. Only an accessibility
+            ; element whose name starts with the filename can be an upload
+            ; chip; prompt paragraphs start with "Image n of ...".
+            if !element.IsOffscreen && InStr(exposedName, fileNameLower) = 1
+                return true
+        }
+    }
+    return false
+}
+
+SaveBotzState(state) {
+    global botzStateFilePath
+    text := "CROMARTIE_BOTZ_STATE_V3`n"
+    text .= "product_name`t" EncodeStateValue(state["productName"]) "`n"
+    text .= "stock_code`t" EncodeStateValue(state["stockCode"]) "`n"
+    text .= "match_code`t" state["matchCode"] "`n"
+    text .= "folder`t" EncodeStateValue(state["productFolder"]) "`n"
+    text .= "product_md`t" EncodeStateValue(state["productMdPath"]) "`n"
+    text .= "product_md_size`t" state["productMdSize"] "`n"
+    text .= "product_md_modified`t" state["productMdModified"] "`n"
+    text .= "initial_gallery_count`t" state["initialGalleryCount"] "`n"
+    text .= "uploaded_count`t" state["uploadedCount"] "`n"
+    text .= "pending_image`t" state["pendingImageIndex"] "`n"
+    text .= "image_count`t" state["imageCount"] "`n"
+    for index, imagePath in state["images"] {
+        manifestItem := state["imageManifest"][index]
+        text .= "image`t" index "`t" EncodeStateValue(imagePath) "`t" manifestItem["size"] "`t" manifestItem["modified"] "`n"
+    }
+    if FileExist(botzStateFilePath)
+        FileDelete botzStateFilePath
+    FileAppend text, botzStateFilePath, "UTF-8"
+}
+
+LoadBotzState() {
+    global botzStateFilePath, botzState
+    if botzState
+        return botzState
+    if !FileExist(botzStateFilePath)
+        throw Error("No saved BOTZ run exists. Build the BOTZ prompt with Numpad4 first.")
+
+    lines := StrSplit(StrReplace(FileRead(botzStateFilePath, "UTF-8"), "`r", ""), "`n")
+    if lines.Length < 10 || (lines[1] != "CROMARTIE_BOTZ_STATE_V2" && lines[1] != "CROMARTIE_BOTZ_STATE_V3")
+        throw Error("The saved BOTZ state file is invalid or unsupported.")
+    stateVersion := lines[1]
+
+    values := Map(), images := [], imageManifest := []
+    Loop lines.Length - 1 {
+        line := lines[A_Index + 1]
+        if line = ""
+            continue
+        parts := StrSplit(line, "`t")
+        if parts[1] = "image" {
+            if parts.Length != 5 || !IsInteger(parts[2]) || Integer(parts[2]) != images.Length + 1 || !IsInteger(parts[4])
+                throw Error("The saved BOTZ image order is invalid.")
+            imagePath := DecodeStateValue(parts[3])
+            images.Push(imagePath)
+            imageManifest.Push(Map("path", imagePath, "size", Integer(parts[4]), "modified", parts[5]))
+        } else {
+            if parts.Length != 2
+                throw Error("The saved BOTZ state contains an invalid record: " line)
+            values[parts[1]] := parts[2]
+        }
+    }
+
+    required := ["product_name", "stock_code", "match_code", "folder", "product_md", "product_md_size", "product_md_modified", "initial_gallery_count", "image_count"]
+    for _, key in required {
+        if !values.Has(key)
+            throw Error("The saved BOTZ state is missing: " key ".")
+    }
+    if !IsInteger(values["image_count"]) || Integer(values["image_count"]) < 1 || Integer(values["image_count"]) != images.Length
+        throw Error("The saved BOTZ image count is invalid.")
+    if stateVersion = "CROMARTIE_BOTZ_STATE_V3" {
+        for _, key in ["uploaded_count", "pending_image"] {
+            if !values.Has(key) || !IsInteger(values[key])
+                throw Error("The saved BOTZ state has invalid or missing progress: " key ".")
+        }
+    }
+    uploadedCount := stateVersion = "CROMARTIE_BOTZ_STATE_V3" && values.Has("uploaded_count") && IsInteger(values["uploaded_count"])
+        ? Integer(values["uploaded_count"])
+        : 0
+    pendingImageIndex := stateVersion = "CROMARTIE_BOTZ_STATE_V3" && values.Has("pending_image") && IsInteger(values["pending_image"])
+        ? Integer(values["pending_image"])
+        : 0
+    if uploadedCount < 0 || uploadedCount > Integer(values["image_count"])
+        throw Error("The saved BOTZ uploaded-image progress is invalid.")
+    if pendingImageIndex < 0 || pendingImageIndex > Integer(values["image_count"])
+        throw Error("The saved BOTZ pending-image progress is invalid.")
+
+    botzState := Map(
+        "mode", "botz",
+        "productName", DecodeStateValue(values["product_name"]),
+        "stockCode", DecodeStateValue(values["stock_code"]),
+        "matchCode", values["match_code"],
+        "productFolder", DecodeStateValue(values["folder"]),
+        "productMdPath", DecodeStateValue(values["product_md"]),
+        "productMdSize", Integer(values["product_md_size"]),
+        "productMdModified", values["product_md_modified"],
+        "initialGalleryCount", Integer(values["initial_gallery_count"]),
+        "uploadedCount", uploadedCount,
+        "pendingImageIndex", pendingImageIndex,
+        "imageCount", Integer(values["image_count"]),
+        "images", images,
+        "imageManifest", imageManifest
+    )
+    return botzState
+}
+
+PasteBotzOutputToCms() {
+    global cmsWinTitle, useRecommendedProductName
+
+    try {
+        ClearActiveCmsProductCode()
+        response := A_Clipboard
+        state := LoadBotzState()
+        SetActiveCmsProductCode(state["stockCode"])
+        ValidateBotzSourcesUnchanged(state)
+        block := ExtractValidatedAutomationBlock(response)
+        output := ParseBotzAutomationOutput(block, state)
+        LogText("botz-chatgpt-output", response)
+        LogText("botz-parsed-output", BuildBotzParsedOutputLog(output))
+
+        ActivateWindow(cmsWinTitle)
+        VerifyBotzCmsProduct(state, output)
+        UploadAndPopulateBotzImages(state, output)
+
+        if useRecommendedProductName && IsUsableProductNameRecommendation(output["productNameRecommendation"])
+            InsertProductNameRecommendation(output["productNameRecommendation"])
+        InsertMetaFields(output["metaTitle"], output["metaDescription"], output["htmlSnippet"])
+        ClickPoint("product_save_button", 1000)
+
+        LogText("botz-product-complete", "Completed BOTZ Product Creation for '" state["productName"] "' (" state["stockCode"] ") with " state["imageCount"] " image(s).")
+        Flash("BOTZ product created and saved with " state["imageCount"] " image(s).", 3000)
+    } catch as err {
+        if HasActiveCmsProductCode() {
+            LogText("botz-error", "Product update stopped: " err.Message)
+            LogText("botz-skipped-product", "BOTZ product was not completed: " err.Message)
+        }
+        throw
+    }
+}
+
+ValidateBotzSourcesUnchanged(state) {
+    if !FileExist(state["productMdPath"])
+        throw Error("The saved BOTZ product.md no longer exists: " state["productMdPath"])
+    if FileGetSize(state["productMdPath"]) != state["productMdSize"] || FileGetTime(state["productMdPath"], "M") != state["productMdModified"]
+        throw Error("product.md changed after the ChatGPT request was built. Rebuild the BOTZ prompt before continuing.")
+
+    matchedFolder := FindUniqueBotzProductFolder(state["matchCode"])
+    if StrLower(matchedFolder) != StrLower(state["productFolder"])
+        throw Error("The exact BOTZ folder match changed after the request was built. Rebuild the BOTZ prompt.")
+
+    currentImages := EnumerateBotzImageFiles(state["productFolder"] "\images")
+    if !BotzPathArraysMatch(currentImages, state["images"])
+        throw Error("The BOTZ images folder changed after the ChatGPT request was built. Rebuild the prompt so image order and output fields remain aligned.")
+    Loop currentImages.Length {
+        imagePath := currentImages[A_Index]
+        savedItem := state["imageManifest"][A_Index]
+        if FileGetSize(imagePath) != savedItem["size"] || FileGetTime(imagePath, "M") != savedItem["modified"]
+            throw Error("BOTZ image " A_Index " changed after the ChatGPT request was built: " imagePath ". Rebuild the prompt before uploading.")
+    }
+}
+
+BotzPathArraysMatch(pathsA, pathsB) {
+    if pathsA.Length != pathsB.Length
+        return false
+    Loop pathsA.Length {
+        if StrLower(pathsA[A_Index]) != StrLower(pathsB[A_Index])
+            return false
+    }
+    return true
+}
+
+ExtractValidatedAutomationBlock(response) {
+    startMarker := "===AUTOMATION_OUTPUT_START==="
+    endMarker := "===AUTOMATION_OUTPUT_END==="
+    if CountTextOccurrences(response, startMarker) != 1 || CountTextOccurrences(response, endMarker) != 1
+        throw Error("The ChatGPT response must contain exactly one complete automation-output marker pair.")
+    if InStr(response, endMarker) <= InStr(response, startMarker)
+        throw Error("The automation-output markers are in the wrong order.")
+    block := ExtractBetween(response, startMarker, endMarker)
+    if block = ""
+        throw Error("The automation-output block is empty.")
+    return block
+}
+
+CountTextOccurrences(text, needle) {
+    count := 0, position := 1
+    while position := InStr(text, needle, , position) {
+        count += 1
+        position += StrLen(needle)
+    }
+    return count
+}
+
+ParseBotzAutomationOutput(block, state) {
+    expected := ["MODE", "PRODUCT_NAME", "IMAGE_COUNT", "PRODUCT_NAME_RECOMMENDATION", "META_TITLE", "META_DESCRIPTION", "HTML_SNIPPET"]
+    Loop state["imageCount"] {
+        expected.Push("IMAGE_" A_Index "_NAME")
+        expected.Push("IMAGE_" A_Index "_TITLE")
+        expected.Push("IMAGE_" A_Index "_ALT")
+    }
+    fields := ParseOrderedAutomationFields(block, expected)
+
+    mode := ValidateMatrixFullOneLine(fields["MODE"], "BOTZ mode")
+    if mode != "BOTZ_PRODUCT_CREATION"
+        throw Error("BOTZ output MODE must be BOTZ_PRODUCT_CREATION.")
+    echoedName := ValidateMatrixFullOneLine(fields["PRODUCT_NAME"], "BOTZ product name")
+    if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["productName"])
+        throw Error("The BOTZ output product name does not match the saved GO b2b product name.")
+    if !IsInteger(fields["IMAGE_COUNT"]) || Integer(fields["IMAGE_COUNT"]) != state["imageCount"]
+        throw Error("The BOTZ output image count does not match the current BOTZ image folder.")
+
+    recommendation := ValidateMatrixFullOneLine(fields["PRODUCT_NAME_RECOMMENDATION"], "Product name recommendation")
+    metaTitle := ValidateMatrixFullOneLine(fields["META_TITLE"], "Meta title")
+    metaDescription := ValidateMatrixFullOneLine(fields["META_DESCRIPTION"], "Meta description")
+    htmlSnippet := StripCodeFence(fields["HTML_SNIPPET"])
+    ValidateBotzHtml(htmlSnippet)
+
+    imageNames := [], imageTitles := [], imageAlts := []
+    Loop state["imageCount"] {
+        i := A_Index
+        imageName := ValidateBotzImageName(fields["IMAGE_" i "_NAME"], i)
+        imageTitle := ValidateImageOutputValue(fields["IMAGE_" i "_TITLE"], "Image " i " title")
+        imageAlt := ValidateImageOutputValue(fields["IMAGE_" i "_ALT"], "Image " i " alt text")
+        if NormaliseHarmlessWhitespace(imageName) = NormaliseHarmlessWhitespace(imageTitle) || NormaliseHarmlessWhitespace(imageName) = NormaliseHarmlessWhitespace(imageAlt)
+            throw Error("Image " i " Name must be distinct from its Title and Alt text.")
+        if NormaliseHarmlessWhitespace(imageTitle) = NormaliseHarmlessWhitespace(imageAlt)
+            throw Error("Image " i " Title and Alt text are identical.")
+        imageNames.Push(imageName), imageTitles.Push(imageTitle), imageAlts.Push(imageAlt)
+    }
+
+    warnings := ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, true)
+    if warnings != ""
+        throw Error("BOTZ generated-field validation failed:`n" warnings)
+
+    return Map(
+        "mode", mode,
+        "productName", echoedName,
+        "productNameRecommendation", recommendation,
+        "metaTitle", metaTitle,
+        "metaDescription", metaDescription,
+        "htmlSnippet", htmlSnippet,
+        "imageNames", imageNames,
+        "imageTitles", imageTitles,
+        "imageAlts", imageAlts
+    )
+}
+
+ParseOrderedAutomationFields(block, expectedLabels) {
+    text := StrReplace(block, "`r", "")
+    allowed := Map(), fields := Map(), locations := []
+    for _, label in expectedLabels
+        allowed[label] := true
+
+    position := 1
+    while found := RegExMatch(text, "m)^([A-Z][A-Z0-9_]*):[ `t]*$", &match, position) {
+        label := match[1]
+        if !allowed.Has(label)
+            throw Error("Unexpected automation label: " label ".")
+        position := found + StrLen(match[0])
+    }
+
+    searchFrom := 1
+    for _, label in expectedLabels {
+        pattern := "m)^" label ":[ `t]*$"
+        found := RegExMatch(text, pattern, &match, searchFrom)
+        if !found
+            throw Error("Missing or out-of-order automation field: " label ".")
+        duplicate := RegExMatch(text, pattern, , found + StrLen(match[0]))
+        if duplicate
+            throw Error("Duplicate automation label: " label ".")
+        locations.Push(Map("label", label, "labelStart", found, "valueStart", found + StrLen(match[0])))
+        searchFrom := found + StrLen(match[0])
+    }
+    if Trim(SubStr(text, 1, locations[1]["labelStart"] - 1), " `t`n") != ""
+        throw Error("Unexpected text appears before the first BOTZ automation field.")
+
+    Loop locations.Length {
+        item := locations[A_Index]
+        valueEnd := A_Index < locations.Length ? locations[A_Index + 1]["labelStart"] : StrLen(text) + 1
+        fields[item["label"]] := Trim(SubStr(text, item["valueStart"], valueEnd - item["valueStart"]), " `t`n")
+    }
+    return fields
+}
+
+ValidateBotzImageName(value, imageIndex) {
+    value := ValidateImageOutputValue(value, "Image " imageIndex " name")
+    if InStr(value, "\") || InStr(value, "/") || RegExMatch(value, "i)\.(jpe?g|png|webp)$")
+        throw Error("Image " imageIndex " Name looks like a file path or filename. It must be a clean CMS image name.")
+    return value
+}
+
+ValidateBotzHtml(htmlSnippet) {
+    if CleanText(htmlSnippet) = ""
+        throw Error("BOTZ HTML snippet is empty.")
+    if !InStr(htmlSnippet, "<")
+        throw Error("BOTZ HTML snippet does not look like HTML.")
+    if InStr(htmlSnippet, "{{") || InStr(htmlSnippet, "}}")
+        throw Error("BOTZ HTML snippet contains placeholder text.")
+    if RegExMatch(htmlSnippet, "i)(oaicite|contentReference|:source\[|\[citation)")
+        throw Error("BOTZ HTML snippet contains citation/source-token text.")
+    if InStr(htmlSnippet, Chr(96) Chr(96) Chr(96))
+        throw Error("BOTZ HTML snippet still contains a code fence.")
+}
+
+BuildBotzParsedOutputLog(output) {
+    text := "Mode: " output["mode"]
+    text .= "`nProduct name: " output["productName"]
+    text .= "`nRecommendation: " output["productNameRecommendation"]
+    text .= "`nMeta title: " output["metaTitle"]
+    text .= "`nMeta description: " output["metaDescription"]
+    text .= "`nHTML snippet:`n" output["htmlSnippet"]
+    Loop output["imageNames"].Length {
+        i := A_Index
+        text .= "`nImage " i " Name: " output["imageNames"][i]
+        text .= "`nImage " i " Title: " output["imageTitles"][i]
+        text .= "`nImage " i " Alt: " output["imageAlts"][i]
+    }
+    return text
+}
+
+VerifyBotzCmsProduct(state, output) {
+    ClickPoint("overview_tab", 500)
+    currentProductName := CleanText(CopyFromPoint("product_name"))
+    currentStockCode := CleanText(CopyFromPoint("stock_code"))
+    if currentStockCode != state["stockCode"]
+        throw Error("The open GO b2b stock code changed. Expected '" state["stockCode"] "', found '" currentStockCode "'.")
+    if TransformBotzStockCode(currentStockCode) != state["matchCode"]
+        throw Error("The open GO b2b product no longer maps to the saved BOTZ folder code.")
+
+    originalMatches := NormaliseHarmlessWhitespace(currentProductName) = NormaliseHarmlessWhitespace(state["productName"])
+    recommendedMatches := IsUsableProductNameRecommendation(output["productNameRecommendation"])
+        && NormaliseHarmlessWhitespace(currentProductName) = NormaliseHarmlessWhitespace(output["productNameRecommendation"])
+    if !originalMatches && !recommendedMatches
+        throw Error("The open GO b2b product name does not match the saved BOTZ run. Expected '" state["productName"] "', found '" currentProductName "'.")
+    LogText("botz-product-verified", "Product name: " currentProductName "`nStock code: " currentStockCode "`nFolder code: " state["matchCode"])
+}
+
+UploadAndPopulateBotzImages(state, output) {
+    if state["pendingImageIndex"]
+        throw Error("A previous BOTZ run stopped while image " state["pendingImageIndex"] " was being added. Inspect that image manually before retrying; no image was uploaded twice.")
+    if state["uploadedCount"] = state["imageCount"] {
+        LogText("botz-upload-recovery", "Saved BOTZ progress already marks all " state["imageCount"] " image detail record(s) complete; uploads were skipped.")
+        return true
+    }
+
+    startIndex := state["uploadedCount"] + 1
+    remaining := state["imageCount"] - state["uploadedCount"]
+    LogText("botz-upload-recovery", "Starting/resuming BOTZ upload at image " startIndex " of " state["imageCount"] ".")
+
+    Loop remaining {
+        imageIndex := startIndex + A_Index - 1
+        imagePath := state["images"][imageIndex]
+        try {
+            UploadAndPopulateSingleBotzImage(state, imagePath, imageIndex, state["imageCount"], output)
+            state["uploadedCount"] := imageIndex
+            state["pendingImageIndex"] := 0
+            SaveBotzState(state)
+        } catch as err {
+            LogText("botz-upload-error", "Image " imageIndex " of " state["imageCount"] ": " imagePath "`n" err.Message)
+            throw Error("BOTZ image upload/details stopped at image " imageIndex " of " state["imageCount"] ": " err.Message)
+        }
+    }
+    return true
+}
+
+UploadAndPopulateSingleBotzImage(state, imagePath, imageIndex, totalImages, output) {
+    global botzFilePickerTimeoutMs, botzImagesTabLoadMs, botzImageDetailsLoadMs
+    if !FileExist(imagePath)
+        throw Error("Image source no longer exists: " imagePath)
+
+    ; Give the Images tab time to render before clicking its Add button.
+    ClickPoint("images_tab", botzImagesTabLoadMs)
+    LogText("botz-image-upload", "Starting image " imageIndex " of " totalImages ": " imagePath)
+    ClickPoint("image_add_button", 500)
+    picker := WinWaitActive("ahk_class #32770", , botzFilePickerTimeoutMs / 1000)
+    if !picker
+        throw Error("The GO b2b Add button did not open the Windows file picker.")
+    ChooseSingleFileInPicker(imagePath)
+
+    ; The file has been submitted. Persist an ambiguous in-progress state before
+    ; touching the detail form so recovery cannot upload the same image twice.
+    state["pendingImageIndex"] := imageIndex
+    SaveBotzState(state)
+
+    ToolTip "Waiting for image " imageIndex " detail fields..."
+    Sleep botzImageDetailsLoadMs
+    PasteToPoint("image_name", output["imageNames"][imageIndex])
+    PasteToPoint("image_title", output["imageTitles"][imageIndex])
+    PasteToPoint("image_alt", output["imageAlts"][imageIndex])
+    ClickPoint("image_save_button", 1200)
+
+    LogText(
+        "botz-image-metadata",
+        "Uploaded and saved image " imageIndex " of " totalImages ": " imagePath
+        . "`nName: " output["imageNames"][imageIndex]
+        . "`nTitle: " output["imageTitles"][imageIndex]
+        . "`nAlt/tag: " output["imageAlts"][imageIndex]
+    )
 }
 
 ; ==========================================================
@@ -1534,7 +2688,7 @@ ParseImageOnlyOutput(block, imageCount) {
             throw Error("Image " A_Index " title and alt text are identical.")
         titles.Push(title), alts.Push(alt)
     }
-    return Map("productNameRecommendation", "", "metaTitle", "", "metaDescription", "", "htmlSnippet", "", "imageTitles", titles, "imageAlts", alts)
+    return Map("productNameRecommendation", "", "metaTitle", "", "metaDescription", "", "htmlSnippet", "", "imageNames", [], "imageTitles", titles, "imageAlts", alts)
 }
 
 ParseExactLineFields(block, expectedLabels) {
@@ -1766,8 +2920,10 @@ BuildMatrixImagePrompt(pageUrl) {
     global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixState, MatrixImagePromptTemplatePath
     global additionalProductNotesDefault, activeMatrixParentProductName
     ValidateImageTargetConfig()
+    ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
+    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     parentName := CopyFromPoint("product_name")
     activeMatrixParentProductName := parentName
     ClickPoint("description_tab", 600)
@@ -1855,8 +3011,10 @@ BuildMatrixFullPrompt(pageUrl) {
     global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixFullState
     global MatrixFullPromptTemplatePath, activeMatrixParentProductName
     ValidateImageTargetConfig()
+    ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
+    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     parentName := CopyFromPoint("product_name")
     activeMatrixParentProductName := parentName
     ClickPoint("description_tab", 600)
@@ -1998,6 +3156,10 @@ PasteMatrixFullOutputToCms() {
     state := LoadMatrixState("matrix_full")
     activeMatrixParentProductName := state["parentProductName"]
     ValidateMatrixStateImageTargets(state, imageTargets.Length)
+    ClearActiveCmsProductCode()
+    ActivateWindow(cmsWinTitle)
+    ClickPoint("overview_tab", 500)
+    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     response := A_Clipboard
     block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
     if block = ""
@@ -2008,8 +3170,6 @@ PasteMatrixFullOutputToCms() {
     LogText("matrix_full-chatgpt-output", response)
     LogText("matrix_full-automation-block", block)
     LogText("matrix_full-parsed-output", BuildMatrixFullParsedLog(output))
-    ActivateWindow(cmsWinTitle)
-
     if useRecommendedProductName && IsUsableProductNameRecommendation(output["parentProductNameRecommendation"]) {
         InsertProductNameRecommendation(output["parentProductNameRecommendation"])
         ; Read the value back from GO b2b and use that exact CMS value for the
@@ -2094,13 +3254,16 @@ PasteMatrixImageOutputToCms() {
     state := LoadMatrixState()
     activeMatrixParentProductName := state["parentProductName"]
     ValidateMatrixStateImageTargets(state, imageTargets.Length)
+    ClearActiveCmsProductCode()
+    ActivateWindow(cmsWinTitle)
+    ClickPoint("overview_tab", 500)
+    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     response := A_Clipboard
     block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
     if block = ""
         throw Error("A complete matrix automation block is not on the clipboard.")
     output := ParseMatrixImageOutput(block, state)
     LogText("matrix_image-chatgpt-output", response)
-    ActivateWindow(cmsWinTitle)
     if state["parentImageCount"] {
         DetectAndSetImageCountFromImagesTab(state["parentImageCount"])
         Loop state["parentImageCount"]

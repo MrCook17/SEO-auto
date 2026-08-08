@@ -16,3 +16,7 @@ Run `cromartie-seo-automation.ahk` from the repository root. Keep the relative f
 - `debug/` — generated accessibility-tree diagnostics
 
 The automation creates `logs/`, `backups/`, `state/` and `debug/` when needed. Generated logs, backups and diagnostics are ignored by Git.
+
+## BOTZ prompt settings
+
+While `SeoAutomationMode` is set to `botz`, press `Ctrl+Shift+NumLock` to edit the saved Cromartie page URL, up to two recommended internal links, extra inlink information and additional notes. Save writes the values to `state/botz-prompt-settings.txt`; they are loaded automatically when the script starts and inserted into the BOTZ prompt.
