@@ -1,17 +1,17 @@
 ﻿CROMARTIE_BOTZ_STATE_V3
-product_name	SKY BLUE 800ML
-stock_code	B94488
-match_code	9448
-folder	C:\BOTZ\9448 Sky blue
-product_md	C:\BOTZ\9448 Sky blue\product.md
-product_md_size	906
-product_md_modified	20260806131608
+product_name	PETROL 800ML
+stock_code	B94548
+match_code	9454
+folder	C:\BOTZ\9454 Petrol
+product_md	C:\BOTZ\9454 Petrol\product.md
+product_md_size	867
+product_md_modified	20260806131618
 initial_gallery_count	0
 uploaded_count	5
 pending_image	0
 image_count	5
-image	1	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_01.jpg	113859	20260806131605
-image	2	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_03.jpg	89412	20260806131606
-image	3	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_04.jpg	82796	20260806143320
-image	4	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_05.jpg	128468	20260806143328
-image	5	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_06.jpg	73120	20260806143331
+image	1	C:\BOTZ\9454 Petrol\images\9454_petrol_01.jpg	112643	20260806131617
+image	2	C:\BOTZ\9454 Petrol\images\9454_petrol_02.jpg	128305	20260806131617
+image	3	C:\BOTZ\9454 Petrol\images\9454_petrol_03.jpg	69925	20260806143422
+image	4	C:\BOTZ\9454 Petrol\images\9454_petrol_04.jpg	57352	20260806143424
+image	5	C:\BOTZ\9454 Petrol\images\9454_petrol_05.jpg	66505	20260806143427

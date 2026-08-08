@@ -20,7 +20,7 @@ CoordMode "Mouse", "Screen"
 ; - Uses a temporary hardcoded public URL instead of the GO B2B CMS URL.
 ; - Pastes the prompt into ChatGPT.
 ; - Tries to copy one or more high-quality product images from the CMS Images tab and paste them into ChatGPT.
-; - Stops before sending in ordinary and matrix modes; BOTZ submits after its attachment timer.
+; - Stops before sending in ordinary and matrix modes unless full workflow automation is enabled; BOTZ submits after its attachment timer.
 ; - Uses ChatGPT's latest response Copy button and extracts its automation block.
 ; - Pastes generated SEO fields into GO B2B.
 ; - Clicks the main product Save button after all fields are pasted in full, metadata and image-only modes.
@@ -91,6 +91,8 @@ global botzPromptSettings := 0
 global botzPromptSettingsGui := 0
 global activeMatrixParentProductName := ""
 global activeCmsProductCode := ""
+global automaticWorkflowActive := false
+global automaticWorkflowCancelRequested := false
 global LastEditButtons := []
 global LastDocument := 0
 
@@ -152,6 +154,12 @@ chatPasteVerifyDelayMs := 900
 chatResponseCopyTimeoutMs := 5000
 chatResponseScrollNotches := 100
 chatResponseCopyButtonPoint := [2230, 902]
+chatResponseInitialWaitMs := 120000
+chatResponsePollIntervalMs := 30000
+
+; Ctrl+Alt+A toggles this. Keep it off by default so Numpad4, NumpadEnter and
+; Numpad6 retain their existing manual workflow until automation is requested.
+fullWorkflowAutomationEnabled := false
 
 ; Coordinates from docs\config-notes.md
 coords := Map(
@@ -207,6 +215,7 @@ NumpadEnter:: OpenProductBuildPromptAndPasteToChatGPT()
 Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!i:: TryCopyCmsImagesToChatGPT()
 ^!n:: ToggleRecommendedProductName()
+^!a:: ToggleFullWorkflowAutomation()
 ^+NumLock:: OpenBotzPromptSettingsGui()
 ^0:: SetImageCountToProcess(0)
 ^1:: SetImageCountToProcess(1)
@@ -218,8 +227,8 @@ Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^7:: SetImageCountToProcess(7)
 ^8:: SetImageCountToProcess(8)
 ^9:: SetImageCountToProcess(9)
-; ^!o:: PasteCopiedChatGPTOutputToCms()
-Numpad6:: PasteCopiedChatGPTOutputToCms()
+; ^!o:: RunManualChatGptOutputPaste()
+Numpad6:: RunManualChatGptOutputPaste()
 F8:: ShowLastLocations()
 F9:: DumpAccessibilityTree()
 ^!r:: Reload()
@@ -234,7 +243,10 @@ Esc:: ExitApp()
 
 TestScript() {
     global useRecommendedProductName, SeoAutomationMode, imageCountToProcess
+    global fullWorkflowAutomationEnabled, automaticWorkflowActive
     nameMode := useRecommendedProductName ? "ON" : "OFF"
+    automationMode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
+    automationStatus := automaticWorkflowActive ? "currently waiting/running" : "idle"
     savedCount := 0
     savedMode := "none"
     try {
@@ -242,7 +254,13 @@ TestScript() {
         savedCount := savedState["productCount"]
         savedMode := savedState["mode"]
     }
-    MsgBox "SEO mode: " SeoAutomationMode "`nImages: " imageCountToProcess "`nRecommended product-name insertion: " nameMode "`nUIA-v2 matrix support: available`nSaved matrix state: " savedMode "`nSaved matrix children: " savedCount
+    MsgBox "SEO mode: " SeoAutomationMode
+        . "`nImages: " imageCountToProcess
+        . "`nRecommended product-name insertion: " nameMode
+        . "`nFull workflow automation (Ctrl+Alt+A): " automationMode " (" automationStatus ")"
+        . "`nUIA-v2 matrix support: available"
+        . "`nSaved matrix state: " savedMode
+        . "`nSaved matrix children: " savedCount
 }
 
 CopyActiveWindowTitle() {
@@ -256,6 +274,18 @@ ToggleRecommendedProductName() {
     useRecommendedProductName := !useRecommendedProductName
     mode := useRecommendedProductName ? "ON" : "OFF"
     Flash("Product name recommendation paste: " mode)
+}
+
+ToggleFullWorkflowAutomation() {
+    global fullWorkflowAutomationEnabled, automaticWorkflowCancelRequested
+    fullWorkflowAutomationEnabled := !fullWorkflowAutomationEnabled
+    if !fullWorkflowAutomationEnabled
+        automaticWorkflowCancelRequested := true
+    mode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
+    message := "Full workflow automation: " mode
+    if !fullWorkflowAutomationEnabled
+        message .= "`nAny active ChatGPT wait will stop safely."
+    Flash(message, 2500)
 }
 
 SetImageCountToProcess(imageCount) {
@@ -313,6 +343,7 @@ OpenProductBuildPromptAndPasteToChatGPT() {
             BuildMatrixFullPrompt(pageUrl)
         else
             BuildPromptFromCurrentProductPage(pageUrl)
+        RunAutomaticWorkflowIfEnabled(IsBotzMode())
     } catch as err {
         MsgBox "OpenProductBuildPromptAndPasteToChatGPT failed:`n`n" err.Message
     }
@@ -340,6 +371,7 @@ BuildPromptFromOpenProductPageAndPasteToChatGPT() {
             BuildMatrixImagePrompt(pageUrl)
         else
             BuildPromptFromCurrentProductPage(pageUrl)
+        RunAutomaticWorkflowIfEnabled(IsBotzMode())
     } catch as err {
         MsgBox "BuildPromptFromOpenProductPageAndPasteToChatGPT failed:`n`n" err.Message
     }
@@ -412,7 +444,9 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     PastePromptToChatGPT(prompt)
 
     if attemptImageCopyAfterPrompt {
-        TryCopyCmsImagesToChatGPT(false)
+        imagesReady := TryCopyCmsImagesToChatGPT(false)
+        if IsFullWorkflowAutomationEnabled() && !imagesReady
+            throw Error("Full workflow automation stopped before sending because one or more CMS images could not be pasted into ChatGPT.")
         Flash("Prompt pasted. Image copy attempted.")
         return
     }
@@ -1025,29 +1059,37 @@ CountImageGalleryCards(scope) {
 ; HOTKEY 2 - PASTE COPIED CHATGPT OUTPUT INTO CMS
 ; ==========================================================
 
-PasteCopiedChatGPTOutputToCms() {
+RunManualChatGptOutputPaste() {
+    global automaticWorkflowActive, automaticWorkflowCancelRequested
+    if automaticWorkflowActive
+        automaticWorkflowCancelRequested := true
+    return PasteCopiedChatGPTOutputToCms(true)
+}
+
+PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
     global cmsWinTitle, useRecommendedProductName, imageCountToProcess
 
     try {
         EnsureFolders()
         ValidateSeoAutomationMode()
-        CopyLatestChatGptResponseToClipboard()
+        if copyLatestResponse
+            CopyLatestChatGptResponseToClipboard()
 
         if IsBotzMode() {
             PasteBotzOutputToCms()
-            return
+            return true
         }
 
         ValidateImageTargetConfig()
 
         if IsMatrixFullMode() {
             PasteMatrixFullOutputToCms()
-            return
+            return true
         }
 
         if IsMatrixImageMode() {
             PasteMatrixImageOutputToCms()
-            return
+            return true
         }
 
         ActivateWindow(cmsWinTitle)
@@ -1060,14 +1102,14 @@ PasteCopiedChatGPTOutputToCms() {
 
         if !InStr(response, "===AUTOMATION_OUTPUT_START===") {
             MsgBox "The automated ChatGPT copy did not place an automation block on the clipboard. No CMS fields were changed."
-            return
+            return false
         }
 
         block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
 
         if block = "" {
             MsgBox "Automation markers were found, but the block could not be extracted."
-            return
+            return false
         }
 
         output := IsImageOnlyMode() ? ParseImageOnlyOutput(block, imageCountToProcess) : ParseAutomationOutput(block, imageCountToProcess, IsMetadataOnlyMode())
@@ -1087,7 +1129,7 @@ PasteCopiedChatGPTOutputToCms() {
 
         if warnings != "" {
             MsgBox "Warnings found. No fields were pasted.`n`n" warnings
-            return
+            return false
         }
 
         ActivateWindow(cmsWinTitle)
@@ -1117,9 +1159,127 @@ PasteCopiedChatGPTOutputToCms() {
             Flash("Image SEO fields pasted and product saved.")
         else
             Flash("SEO fields pasted; main product was not saved.")
+        return true
     } catch as err {
         MsgBox "PasteCopiedChatGPTOutputToCms failed:`n`n" err.Message
+        return false
     }
+}
+
+IsFullWorkflowAutomationEnabled() {
+    global fullWorkflowAutomationEnabled
+    return fullWorkflowAutomationEnabled
+}
+
+RunAutomaticWorkflowIfEnabled(promptAlreadySubmitted := false) {
+    global fullWorkflowAutomationEnabled, automaticWorkflowActive
+    global automaticWorkflowCancelRequested
+
+    if !fullWorkflowAutomationEnabled
+        return false
+    if automaticWorkflowActive
+        throw Error("A full automatic workflow is already active.")
+
+    automaticWorkflowActive := true
+    automaticWorkflowCancelRequested := false
+    try {
+        if !promptAlreadySubmitted && !SubmitChatGptDraftForAutomaticWorkflow()
+            return false
+
+        if !WaitForAutomaticChatGptOutput()
+            return false
+        if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled
+            return false
+
+        ToolTip "Full workflow automation`nChatGPT output copied and validated.`nUpdating GO b2b CMS now..."
+        return PasteCopiedChatGPTOutputToCms(false)
+    } finally {
+        automaticWorkflowActive := false
+        automaticWorkflowCancelRequested := false
+        ToolTip()
+    }
+}
+
+SubmitChatGptDraftForAutomaticWorkflow() {
+    global chatgptWinTitle, fullWorkflowAutomationEnabled
+    global automaticWorkflowCancelRequested
+    ToolTip "Full workflow automation`nSubmitting the prepared ChatGPT request..."
+    ActivateWindow(chatgptWinTitle, 300)
+    FocusChatGptInputForPaste()
+    if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled
+        return false
+    LogText("chatgpt-auto-submit", "Pressing Enter to start the automatic ChatGPT round trip.")
+    Send "{Enter}"
+    Sleep 300
+    return true
+}
+
+WaitForAutomaticChatGptOutput() {
+    global fullWorkflowAutomationEnabled, automaticWorkflowCancelRequested
+    global chatResponseInitialWaitMs, chatResponsePollIntervalMs
+
+    startedAt := A_TickCount
+    nextAttemptAt := startedAt + chatResponseInitialWaitMs
+    attempt := 0
+    lastProblem := ""
+
+    Loop {
+        if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled {
+            ToolTip()
+            return false
+        }
+
+        now := A_TickCount
+        remainingMs := nextAttemptAt - now
+        if remainingMs > 0 {
+            message := "FULL WORKFLOW AUTOMATION ON"
+                . "`nWaiting for ChatGPT to finish..."
+                . "`nElapsed: " FormatAutomationWaitTime(now - startedAt)
+            if attempt = 0
+                message .= "`nFirst copy attempt in: " FormatAutomationWaitTime(remainingMs)
+            else {
+                message .= "`nCopy attempt " attempt " did not find the finished output."
+                message .= "`nNext attempt in: " FormatAutomationWaitTime(remainingMs)
+                if lastProblem != ""
+                    message .= "`nLast result: " lastProblem
+            }
+            message .= "`nCtrl+Alt+A: turn automation off"
+                . "`nNumpad6: use the manual fallback now"
+            ToolTip message
+            Sleep Min(500, remainingMs)
+            continue
+        }
+
+        attempt += 1
+        ToolTip "FULL WORKFLOW AUTOMATION ON"
+            . "`nCopy attempt " attempt ": scrolling to the bottom of ChatGPT..."
+            . "`nNo CMS fields will change unless a complete output block is copied."
+        copied := TryCopyLatestChatGptResponseByCoordinates(&lastProblem)
+
+        ; Numpad6 can interrupt the wait and complete the manual fallback. Do
+        ; not let this suspended automatic thread continue into a second paste.
+        if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled {
+            ToolTip()
+            return false
+        }
+        if copied {
+            LogText("chatgpt-auto-output-ready", "A complete ChatGPT automation output was copied on polling attempt " attempt ".")
+            ToolTip "FULL WORKFLOW AUTOMATION ON"
+                . "`nComplete ChatGPT output found on attempt " attempt "."
+                . "`nStarting GO b2b insertion..."
+            Sleep 500
+            return true
+        }
+
+        nextAttemptAt := A_TickCount + chatResponsePollIntervalMs
+    }
+}
+
+FormatAutomationWaitTime(milliseconds) {
+    totalSeconds := Ceil(Max(0, milliseconds) / 1000)
+    minutes := Floor(totalSeconds / 60)
+    seconds := Mod(totalSeconds, 60)
+    return minutes ":" Format("{:02}", seconds)
 }
 
 ; ==========================================================
@@ -3060,7 +3220,8 @@ BuildMatrixImagePrompt(pageUrl) {
     parentDescription := CopyOptionalFromPoint("meta_description")
     parentImageCount := DetectAndSetImageCountFromImagesTab()
     if parentImageCount
-        TryCopyCmsImagesToChatGPT(false)
+        if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+            throw Error("Full workflow automation stopped because the matrix parent images were not pasted into ChatGPT successfully.")
     ; Visiting the parent Images tab can leave Chromium's matrix-SKU UIA tree
     ; stale. Close and reopen the complete parent before the first SKU scan so
     ; ReacquireMatrixSkuControls reads a newly built accessibility tree.
@@ -3090,7 +3251,8 @@ BuildMatrixImagePrompt(pageUrl) {
         }
         products[p]["imageCount"] := DetectAndSetImageCountFromImagesTab()
         if products[p]["imageCount"]
-            TryCopyCmsImagesToChatGPT(false)
+            if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+                throw Error("Full workflow automation stopped because images for matrix product " p " were not pasted into ChatGPT successfully.")
         ActivateWindow(cmsWinTitle)
         ClickPoint("matrix_child_cancel_button", 300)
         WaitForMatrixSkuPage(p, productCount)
@@ -3150,7 +3312,8 @@ BuildMatrixFullPrompt(pageUrl) {
     parentDescription := CopyOptionalFromPoint("meta_description")
     parentImageCount := DetectAndSetImageCountFromImagesTab()
     if parentImageCount
-        TryCopyCmsImagesToChatGPT(false)
+        if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+            throw Error("Full workflow automation stopped because the matrix parent images were not pasted into ChatGPT successfully.")
     ; Rebuild the parent after inspecting its Images tab. The reopen helper
     ; returns on a fresh Matrix SKUs tab, ready for the first UIA lookup.
     ActivateWindow(cmsWinTitle)
@@ -3182,7 +3345,8 @@ BuildMatrixFullPrompt(pageUrl) {
         products[p]["originalHtmlSnippet"] := CopyOptionalFromPoint("html_snippet")
         products[p]["imageCount"] := DetectAndSetImageCountFromImagesTab()
         if products[p]["imageCount"]
-            TryCopyCmsImagesToChatGPT(false)
+            if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+                throw Error("Full workflow automation stopped because images for matrix product " p " were not pasted into ChatGPT successfully.")
         ActivateWindow(cmsWinTitle)
         LogText("matrix_full-child-context", "Product " p ": " products[p]["productName"] "`nConnected SKU size: " products[p]["connectedSize"] "`nVariant: " products[p]["variantContext"] "`nSKU row: " products[p]["skuRowText"] "`nHTML:`n" products[p]["originalHtmlSnippet"])
         ClickPoint("matrix_child_cancel_button", 300)
