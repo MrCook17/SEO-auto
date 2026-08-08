@@ -21,7 +21,7 @@ CoordMode "Mouse", "Screen"
 ; - Pastes the prompt into ChatGPT.
 ; - Tries to copy one or more high-quality product images from the CMS Images tab and paste them into ChatGPT.
 ; - Stops before sending in ordinary and matrix modes; BOTZ submits after its attachment timer.
-; - Extracts ChatGPT's automation block from the clipboard.
+; - Uses ChatGPT's latest response Copy button and extracts its automation block.
 ; - Pastes generated SEO fields into GO B2B.
 ; - Clicks the main product Save button after all fields are pasted in full, metadata and image-only modes.
 ; - Automatically clicks the Image Details Save button after each image SEO field set is pasted, because GO B2B requires it to leave the image details page.
@@ -149,6 +149,9 @@ imageContextCopyKey := "y"
 chatPasteRetries := 3
 chatWakeDelayMs := 900
 chatPasteVerifyDelayMs := 900
+chatResponseCopyTimeoutMs := 5000
+chatResponseScrollNotches := 100
+chatResponseCopyButtonPoint := [2230, 902]
 
 ; Coordinates from docs\config-notes.md
 coords := Map(
@@ -1028,6 +1031,7 @@ PasteCopiedChatGPTOutputToCms() {
     try {
         EnsureFolders()
         ValidateSeoAutomationMode()
+        CopyLatestChatGptResponseToClipboard()
 
         if IsBotzMode() {
             PasteBotzOutputToCms()
@@ -1055,7 +1059,7 @@ PasteCopiedChatGPTOutputToCms() {
         response := A_Clipboard
 
         if !InStr(response, "===AUTOMATION_OUTPUT_START===") {
-            MsgBox "Could not find the automation block.`n`nFirst click ChatGPT's copy button on the finished response, then press Ctrl + Alt + O again."
+            MsgBox "The automated ChatGPT copy did not place an automation block on the clipboard. No CMS fields were changed."
             return
         }
 
@@ -1116,6 +1120,130 @@ PasteCopiedChatGPTOutputToCms() {
     } catch as err {
         MsgBox "PasteCopiedChatGPTOutputToCms failed:`n`n" err.Message
     }
+}
+
+; ==========================================================
+; COPY LATEST COMPLETED CHATGPT RESPONSE
+; ==========================================================
+
+CopyLatestChatGptResponseToClipboard() {
+    savedClip := ClipboardAll()
+    uiaProblem := ""
+    fallbackProblem := ""
+
+    try {
+        ToolTip "Finding the latest ChatGPT response Copy button..."
+        if TryCopyLatestChatGptResponseWithUia(&uiaProblem) {
+            ToolTip()
+            return A_Clipboard
+        }
+
+        ToolTip "ChatGPT Copy button was not available through UIA.`nScrolling to the bottom for the coordinate fallback..."
+        if TryCopyLatestChatGptResponseByCoordinates(&fallbackProblem) {
+            ToolTip()
+            return A_Clipboard
+        }
+    } catch as err {
+        fallbackProblem := err.Message
+    }
+
+    ToolTip()
+    A_Clipboard := savedClip
+    throw Error(
+        "Could not copy the latest completed ChatGPT response. No CMS fields were changed."
+        . "`n`nUI Automation: " (uiaProblem != "" ? uiaProblem : "No valid response was copied.")
+        . "`n`nBottom-scroll fallback: " (fallbackProblem != "" ? fallbackProblem : "No valid response was copied.")
+    )
+}
+
+TryCopyLatestChatGptResponseWithUia(&problem) {
+    global chatgptWinTitle, chatResponseCopyTimeoutMs
+    problem := ""
+
+    try {
+        ActivateWindow(chatgptWinTitle, 400)
+        document := UIA_Browser().GetCurrentDocumentElement()
+        copyButton := FindLatestChatGptResponseCopyButton(document)
+        if !copyButton {
+            problem := "No exact-name Copy button was exposed in the ChatGPT accessibility tree."
+            return false
+        }
+
+        A_Clipboard := ""
+        copyButton.Invoke()
+        if !ClipWait(chatResponseCopyTimeoutMs / 1000) {
+            problem := "The latest UIA Copy button did not place text on the clipboard."
+            return false
+        }
+        if !ClipboardHasCompleteAutomationOutput() {
+            problem := "The latest UIA Copy button did not copy one complete automation-output block."
+            return false
+        }
+        return true
+    } catch as err {
+        problem := err.Message
+        return false
+    }
+}
+
+FindLatestChatGptResponseCopyButton(document) {
+    try buttons := document.FindElements({ Name: "Copy", Type: "Button", mm: 2, cs: 0 })
+    catch
+        return 0
+
+    ; ChatGPT exposes code-block actions as "Copy code". Requiring the exact
+    ; accessible name "Copy" leaves only response action buttons. UIA traversal
+    ; order follows the conversation, so the final match belongs to the latest
+    ; completed assistant response even when it is below the visible viewport.
+    Loop buttons.Length {
+        button := buttons[buttons.Length - A_Index + 1]
+        try {
+            if StrLower(Trim(button.Name)) = "copy" && button.IsEnabled
+                return button
+        }
+    }
+    return 0
+}
+
+TryCopyLatestChatGptResponseByCoordinates(&problem) {
+    global chatgptWinTitle, chatResponseCopyTimeoutMs
+    global chatResponseScrollNotches, chatResponseCopyButtonPoint
+    problem := ""
+
+    try {
+        ActivateWindow(chatgptWinTitle, 400)
+        MouseMove chatResponseCopyButtonPoint[1], chatResponseCopyButtonPoint[2], 0
+        SendNativeMouseWheel(-1, chatResponseScrollNotches)
+        Sleep 900
+
+        A_Clipboard := ""
+        Click chatResponseCopyButtonPoint[1], chatResponseCopyButtonPoint[2]
+        if !ClipWait(chatResponseCopyTimeoutMs / 1000) {
+            problem := "Clicking " chatResponseCopyButtonPoint[1] "," chatResponseCopyButtonPoint[2] " did not place text on the clipboard."
+            return false
+        }
+        if !ClipboardHasCompleteAutomationOutput() {
+            problem := "The coordinate fallback did not copy one complete automation-output block."
+            return false
+        }
+        return true
+    } catch as err {
+        problem := err.Message
+        return false
+    }
+}
+
+ClipboardHasCompleteAutomationOutput() {
+    response := A_Clipboard
+    startMarker := "===AUTOMATION_OUTPUT_START==="
+    endMarker := "===AUTOMATION_OUTPUT_END==="
+    startPos := InStr(response, startMarker)
+    endPos := InStr(response, endMarker)
+    return response != ""
+        && CountTextOccurrences(response, startMarker) = 1
+        && CountTextOccurrences(response, endMarker) = 1
+        && startPos < endPos
+        && Trim(ExtractBetween(response, startMarker, endMarker), " `t`r`n") != ""
 }
 
 ; ==========================================================

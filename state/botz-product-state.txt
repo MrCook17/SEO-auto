@@ -1,16 +1,17 @@
 ﻿CROMARTIE_BOTZ_STATE_V3
-product_name	ROYAL BLUE 800ML
-stock_code	B93818
-match_code	9381
-folder	C:\BOTZ\9381 Royal blue
-product_md	C:\BOTZ\9381 Royal blue\product.md
-product_md_size	1016
-product_md_modified	20260806131602
+product_name	SKY BLUE 800ML
+stock_code	B94488
+match_code	9448
+folder	C:\BOTZ\9448 Sky blue
+product_md	C:\BOTZ\9448 Sky blue\product.md
+product_md_size	906
+product_md_modified	20260806131608
 initial_gallery_count	0
-uploaded_count	4
+uploaded_count	5
 pending_image	0
-image_count	4
-image	1	C:\BOTZ\9381 Royal blue\images\9381_royal-blue_01.jpg	91590	20260806131600
-image	2	C:\BOTZ\9381 Royal blue\images\9381_royal-blue_03.jpg	84032	20260806143221
-image	3	C:\BOTZ\9381 Royal blue\images\9381_royal-blue_04.jpg	57301	20260806143225
-image	4	C:\BOTZ\9381 Royal blue\images\9381_royal-blue_05.jpg	200864	20260806131601
+image_count	5
+image	1	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_01.jpg	113859	20260806131605
+image	2	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_03.jpg	89412	20260806131606
+image	3	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_04.jpg	82796	20260806143320
+image	4	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_05.jpg	128468	20260806143328
+image	5	C:\BOTZ\9448 Sky blue\images\9448_sky-blue_06.jpg	73120	20260806143331
