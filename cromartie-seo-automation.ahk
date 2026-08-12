@@ -93,6 +93,10 @@ global activeMatrixParentProductName := ""
 global activeCmsProductCode := ""
 global automaticWorkflowActive := false
 global automaticWorkflowCancelRequested := false
+global automaticWorkflowManualCompletion := false
+global automaticWorkflowCmsInsertionActive := false
+global departmentAutomationActive := false
+global departmentStopAfterCurrent := false
 global LastEditButtons := []
 global LastDocument := 0
 
@@ -161,6 +165,13 @@ chatResponsePollIntervalMs := 30000
 ; Numpad6 retain their existing manual workflow until automation is requested.
 fullWorkflowAutomationEnabled := false
 
+; Ctrl+Alt+D toggles department automation. Ctrl+Numpad4 starts from the
+; already-open first product; Ctrl+Numpad6 requests a stop after that product.
+departmentAutomationEnabled := false
+departmentCatalogueWaitMs := 10000
+departmentCatalogueTreeTimeoutMs := 25000
+departmentProductOpenDelayMs := 10000
+
 ; Coordinates from docs\config-notes.md
 coords := Map(
     ; Initial CMS page
@@ -216,6 +227,9 @@ Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!i:: TryCopyCmsImagesToChatGPT()
 ^!n:: ToggleRecommendedProductName()
 ^!a:: ToggleFullWorkflowAutomation()
+^!d:: ToggleDepartmentAutomation()
+^Numpad4:: StartDepartmentAutomation()
+^Numpad6:: RequestDepartmentStopAfterCurrent()
 ^+NumLock:: OpenBotzPromptSettingsGui()
 ^0:: SetImageCountToProcess(0)
 ^1:: SetImageCountToProcess(1)
@@ -244,9 +258,17 @@ Esc:: ExitApp()
 TestScript() {
     global useRecommendedProductName, SeoAutomationMode, imageCountToProcess
     global fullWorkflowAutomationEnabled, automaticWorkflowActive
+    global departmentAutomationEnabled, departmentAutomationActive
+    global departmentStopAfterCurrent
     nameMode := useRecommendedProductName ? "ON" : "OFF"
     automationMode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
-    automationStatus := automaticWorkflowActive ? "currently waiting/running" : "idle"
+    automationStatus := automaticWorkflowActive
+        ? (departmentAutomationActive ? "active inside department run" : "currently waiting/running")
+        : "idle"
+    departmentMode := departmentAutomationEnabled ? "ON" : "OFF"
+    departmentStatus := departmentAutomationActive
+        ? (departmentStopAfterCurrent ? "stopping after current product" : "running")
+        : "idle"
     savedCount := 0
     savedMode := "none"
     try {
@@ -258,6 +280,9 @@ TestScript() {
         . "`nImages: " imageCountToProcess
         . "`nRecommended product-name insertion: " nameMode
         . "`nFull workflow automation (Ctrl+Alt+A): " automationMode " (" automationStatus ")"
+        . "`nDepartment automation (Ctrl+Alt+D): " departmentMode " (" departmentStatus ")"
+        . "`nDepartment start: Ctrl+Numpad4"
+        . "`nDepartment stop after current product: Ctrl+Numpad6"
         . "`nUIA-v2 matrix support: available"
         . "`nSaved matrix state: " savedMode
         . "`nSaved matrix children: " savedCount
@@ -278,14 +303,43 @@ ToggleRecommendedProductName() {
 
 ToggleFullWorkflowAutomation() {
     global fullWorkflowAutomationEnabled, automaticWorkflowCancelRequested
+    global departmentAutomationActive
     fullWorkflowAutomationEnabled := !fullWorkflowAutomationEnabled
-    if !fullWorkflowAutomationEnabled
+    if !fullWorkflowAutomationEnabled && !departmentAutomationActive
         automaticWorkflowCancelRequested := true
     mode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
     message := "Full workflow automation: " mode
-    if !fullWorkflowAutomationEnabled
+    if !fullWorkflowAutomationEnabled && departmentAutomationActive
+        message .= "`nThe active department run is unaffected; use Ctrl+Numpad6 to stop it after the current product."
+    else if !fullWorkflowAutomationEnabled
         message .= "`nAny active ChatGPT wait will stop safely."
     Flash(message, 2500)
+}
+
+ToggleDepartmentAutomation() {
+    global departmentAutomationEnabled, departmentAutomationActive
+    global departmentStopAfterCurrent
+    departmentAutomationEnabled := !departmentAutomationEnabled
+    if !departmentAutomationEnabled && departmentAutomationActive
+        departmentStopAfterCurrent := true
+    mode := departmentAutomationEnabled ? "ON" : "OFF"
+    message := "Department automation: " mode
+    if !departmentAutomationEnabled && departmentAutomationActive
+        message .= "`nThe current product will finish, then the department run will stop."
+    else if departmentAutomationEnabled
+        message .= "`nStart from the first product Overview with Ctrl+Numpad4."
+    Flash(message, 3000)
+}
+
+RequestDepartmentStopAfterCurrent() {
+    global departmentAutomationActive, departmentStopAfterCurrent
+    if !departmentAutomationActive {
+        Flash("No department automation run is active.", 2000)
+        return false
+    }
+    departmentStopAfterCurrent := true
+    Flash("Department stop requested.`nThe current product will finish and save first.", 3000)
+    return true
 }
 
 SetImageCountToProcess(imageCount) {
@@ -354,27 +408,32 @@ OpenProductBuildPromptAndPasteToChatGPT() {
 ; ==========================================================
 
 BuildPromptFromOpenProductPageAndPasteToChatGPT() {
-    global cmsWinTitle, hardcodedPageUrl
-
     try {
-        EnsureFolders()
-        ActivateWindow(cmsWinTitle)
-
-        ; Use the temporary hardcoded public URL for {{PAGE_URL}}.
-        ; Do not copy the browser URL here because the active page is a GO B2B CMS URL.
-        pageUrl := hardcodedPageUrl
-        if IsBotzMode()
-            BuildBotzPrompt(pageUrl)
-        else if IsMatrixFullMode()
-            BuildMatrixFullPrompt(pageUrl)
-        else if IsMatrixImageMode()
-            BuildMatrixImagePrompt(pageUrl)
-        else
-            BuildPromptFromCurrentProductPage(pageUrl)
-        RunAutomaticWorkflowIfEnabled(IsBotzMode())
+        return RunOpenProductWorkflow(false)
     } catch as err {
         MsgBox "BuildPromptFromOpenProductPageAndPasteToChatGPT failed:`n`n" err.Message
+        return false
     }
+}
+
+RunOpenProductWorkflow(forceAutomaticCompletion := false) {
+    global cmsWinTitle, hardcodedPageUrl
+
+    EnsureFolders()
+    ActivateWindow(cmsWinTitle)
+
+    ; Use the temporary hardcoded public URL for {{PAGE_URL}}. Do not copy the
+    ; browser URL because the active page is a GO b2b CMS URL.
+    pageUrl := hardcodedPageUrl
+    if IsBotzMode()
+        BuildBotzPrompt(pageUrl)
+    else if IsMatrixFullMode()
+        BuildMatrixFullPrompt(pageUrl)
+    else if IsMatrixImageMode()
+        BuildMatrixImagePrompt(pageUrl)
+    else
+        BuildPromptFromCurrentProductPage(pageUrl)
+    return RunAutomaticWorkflowIfEnabled(IsBotzMode(), forceAutomaticCompletion)
 }
 
 ; ==========================================================
@@ -445,7 +504,7 @@ BuildPromptFromCurrentProductPage(pageUrl) {
 
     if attemptImageCopyAfterPrompt {
         imagesReady := TryCopyCmsImagesToChatGPT(false)
-        if IsFullWorkflowAutomationEnabled() && !imagesReady
+        if IsAutomaticWorkflowExecutionEnabled() && !imagesReady
             throw Error("Full workflow automation stopped before sending because one or more CMS images could not be pasted into ChatGPT.")
         Flash("Prompt pasted. Image copy attempted.")
         return
@@ -1061,9 +1120,18 @@ CountImageGalleryCards(scope) {
 
 RunManualChatGptOutputPaste() {
     global automaticWorkflowActive, automaticWorkflowCancelRequested
-    if automaticWorkflowActive
+    global automaticWorkflowManualCompletion, automaticWorkflowCmsInsertionActive
+    if automaticWorkflowCmsInsertionActive {
+        Flash("Automatic CMS insertion is already running. Numpad6 was ignored to prevent a duplicate paste.", 3000)
+        return false
+    }
+    interruptedAutomaticWorkflow := automaticWorkflowActive
+    if interruptedAutomaticWorkflow
         automaticWorkflowCancelRequested := true
-    return PasteCopiedChatGPTOutputToCms(true)
+    succeeded := PasteCopiedChatGPTOutputToCms(true)
+    if interruptedAutomaticWorkflow && succeeded
+        automaticWorkflowManualCompletion := true
+    return succeeded
 }
 
 PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
@@ -1166,47 +1234,69 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
     }
 }
 
-IsFullWorkflowAutomationEnabled() {
-    global fullWorkflowAutomationEnabled
-    return fullWorkflowAutomationEnabled
+IsAutomaticWorkflowExecutionEnabled() {
+    global fullWorkflowAutomationEnabled, departmentAutomationActive
+    return fullWorkflowAutomationEnabled || departmentAutomationActive
 }
 
-RunAutomaticWorkflowIfEnabled(promptAlreadySubmitted := false) {
+RunAutomaticWorkflowIfEnabled(promptAlreadySubmitted := false, forceAutomation := false) {
     global fullWorkflowAutomationEnabled, automaticWorkflowActive
-    global automaticWorkflowCancelRequested
+    global automaticWorkflowCancelRequested, automaticWorkflowManualCompletion
+    global automaticWorkflowCmsInsertionActive, departmentAutomationActive
 
-    if !fullWorkflowAutomationEnabled
+    if !fullWorkflowAutomationEnabled && !forceAutomation
         return false
     if automaticWorkflowActive
         throw Error("A full automatic workflow is already active.")
 
     automaticWorkflowActive := true
     automaticWorkflowCancelRequested := false
+    automaticWorkflowManualCompletion := false
     try {
-        if !promptAlreadySubmitted && !SubmitChatGptDraftForAutomaticWorkflow()
+        if !promptAlreadySubmitted && !SubmitChatGptDraftForAutomaticWorkflow(forceAutomation)
             return false
 
-        if !WaitForAutomaticChatGptOutput()
-            return false
-        if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled
-            return false
+        if !WaitForAutomaticChatGptOutput(forceAutomation)
+            return forceAutomation && departmentAutomationActive && automaticWorkflowManualCompletion
+        if !AutomaticWorkflowMayContinue(forceAutomation)
+            return forceAutomation && departmentAutomationActive && automaticWorkflowManualCompletion
 
-        ToolTip "Full workflow automation`nChatGPT output copied and validated.`nUpdating GO b2b CMS now..."
-        return PasteCopiedChatGPTOutputToCms(false)
+        ToolTip AutomaticWorkflowStatusHeading() "`nChatGPT output copied and validated.`nUpdating GO b2b CMS now..."
+        automaticWorkflowCmsInsertionActive := true
+        try return PasteCopiedChatGPTOutputToCms(false)
+        finally automaticWorkflowCmsInsertionActive := false
     } finally {
         automaticWorkflowActive := false
         automaticWorkflowCancelRequested := false
+        automaticWorkflowManualCompletion := false
+        automaticWorkflowCmsInsertionActive := false
         ToolTip()
     }
 }
 
-SubmitChatGptDraftForAutomaticWorkflow() {
-    global chatgptWinTitle, fullWorkflowAutomationEnabled
-    global automaticWorkflowCancelRequested
-    ToolTip "Full workflow automation`nSubmitting the prepared ChatGPT request..."
+AutomaticWorkflowMayContinue(forceAutomation := false) {
+    global fullWorkflowAutomationEnabled, automaticWorkflowCancelRequested
+    return !automaticWorkflowCancelRequested && (fullWorkflowAutomationEnabled || forceAutomation)
+}
+
+AutomaticWorkflowStatusHeading() {
+    global departmentAutomationActive
+    return departmentAutomationActive ? "DEPARTMENT AUTOMATION RUNNING" : "FULL WORKFLOW AUTOMATION ON"
+}
+
+AutomaticWorkflowControlHint() {
+    global departmentAutomationActive
+    if departmentAutomationActive
+        return "`nCtrl+Numpad6: stop after the current product`nNumpad6: manual output fallback"
+    return "`nCtrl+Alt+A: turn automation off`nNumpad6: use the manual fallback now"
+}
+
+SubmitChatGptDraftForAutomaticWorkflow(forceAutomation := false) {
+    global chatgptWinTitle
+    ToolTip AutomaticWorkflowStatusHeading() "`nSubmitting the prepared ChatGPT request..."
     ActivateWindow(chatgptWinTitle, 300)
     FocusChatGptInputForPaste()
-    if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled
+    if !AutomaticWorkflowMayContinue(forceAutomation)
         return false
     LogText("chatgpt-auto-submit", "Pressing Enter to start the automatic ChatGPT round trip.")
     Send "{Enter}"
@@ -1214,8 +1304,7 @@ SubmitChatGptDraftForAutomaticWorkflow() {
     return true
 }
 
-WaitForAutomaticChatGptOutput() {
-    global fullWorkflowAutomationEnabled, automaticWorkflowCancelRequested
+WaitForAutomaticChatGptOutput(forceAutomation := false) {
     global chatResponseInitialWaitMs, chatResponsePollIntervalMs
 
     startedAt := A_TickCount
@@ -1224,7 +1313,7 @@ WaitForAutomaticChatGptOutput() {
     lastProblem := ""
 
     Loop {
-        if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled {
+        if !AutomaticWorkflowMayContinue(forceAutomation) {
             ToolTip()
             return false
         }
@@ -1232,7 +1321,7 @@ WaitForAutomaticChatGptOutput() {
         now := A_TickCount
         remainingMs := nextAttemptAt - now
         if remainingMs > 0 {
-            message := "FULL WORKFLOW AUTOMATION ON"
+            message := AutomaticWorkflowStatusHeading()
                 . "`nWaiting for ChatGPT to finish..."
                 . "`nElapsed: " FormatAutomationWaitTime(now - startedAt)
             if attempt = 0
@@ -1243,28 +1332,27 @@ WaitForAutomaticChatGptOutput() {
                 if lastProblem != ""
                     message .= "`nLast result: " lastProblem
             }
-            message .= "`nCtrl+Alt+A: turn automation off"
-                . "`nNumpad6: use the manual fallback now"
+            message .= AutomaticWorkflowControlHint()
             ToolTip message
             Sleep Min(500, remainingMs)
             continue
         }
 
         attempt += 1
-        ToolTip "FULL WORKFLOW AUTOMATION ON"
+        ToolTip AutomaticWorkflowStatusHeading()
             . "`nCopy attempt " attempt ": scrolling to the bottom of ChatGPT..."
             . "`nNo CMS fields will change unless a complete output block is copied."
         copied := TryCopyLatestChatGptResponseByCoordinates(&lastProblem)
 
         ; Numpad6 can interrupt the wait and complete the manual fallback. Do
         ; not let this suspended automatic thread continue into a second paste.
-        if automaticWorkflowCancelRequested || !fullWorkflowAutomationEnabled {
+        if !AutomaticWorkflowMayContinue(forceAutomation) {
             ToolTip()
             return false
         }
         if copied {
             LogText("chatgpt-auto-output-ready", "A complete ChatGPT automation output was copied on polling attempt " attempt ".")
-            ToolTip "FULL WORKFLOW AUTOMATION ON"
+            ToolTip AutomaticWorkflowStatusHeading()
                 . "`nComplete ChatGPT output found on attempt " attempt "."
                 . "`nStarting GO b2b insertion..."
             Sleep 500
@@ -1280,6 +1368,290 @@ FormatAutomationWaitTime(milliseconds) {
     minutes := Floor(totalSeconds / 60)
     seconds := Mod(totalSeconds, 60)
     return minutes ":" Format("{:02}", seconds)
+}
+
+; ==========================================================
+; DEPARTMENT-WIDE AUTOMATION
+; ==========================================================
+
+StartDepartmentAutomation() {
+    global departmentAutomationEnabled, departmentAutomationActive
+    global departmentStopAfterCurrent, automaticWorkflowActive
+    global departmentCatalogueWaitMs
+
+    if !departmentAutomationEnabled {
+        MsgBox "Department automation is OFF.`n`nPress Ctrl+Alt+D to turn it on, open the first product's Overview tab, then press Ctrl+Numpad4."
+        return false
+    }
+    if departmentAutomationActive {
+        MsgBox "A department automation run is already active."
+        return false
+    }
+    if automaticWorkflowActive {
+        MsgBox "A single-product automatic workflow is already active. Wait for it to finish or cancel its wait before starting a department."
+        return false
+    }
+
+    departmentAutomationActive := true
+    departmentStopAfterCurrent := false
+    completedCount := 0
+    try {
+        currentIdentity := ReadOpenCmsProductIdentity()
+
+        Loop {
+            productNumber := completedCount + 1
+            ToolTip "DEPARTMENT AUTOMATION RUNNING"
+                . "`nProduct " productNumber ": " currentIdentity["productName"]
+                . "`nCode: " EmptyToNA(currentIdentity["productCode"])
+                . "`nPreparing the ChatGPT workflow..."
+                . "`nCtrl+Numpad6: stop after this product"
+
+            if !RunOpenProductWorkflow(true)
+                throw Error("The automatic workflow did not complete product " productNumber " ('" currentIdentity["productName"] "').")
+
+            completedCount += 1
+            completedIdentity := PrepareCompletedProductForCatalogueLookup(currentIdentity)
+            LogText(
+                "department-product-complete",
+                "Department product " completedCount " completed and saved."
+                . "`nProduct name: " completedIdentity["productName"]
+                . "`nProduct code: " EmptyToNA(completedIdentity["productCode"])
+            )
+
+            if departmentStopAfterCurrent || !departmentAutomationEnabled {
+                LogText("department-stopped", "Department automation stopped after completing " completedCount " product(s), as requested.")
+                MsgBox "Department automation stopped safely after saving the current product.`n`nProducts completed: " completedCount
+                return true
+            }
+
+            ToolTip "DEPARTMENT AUTOMATION RUNNING"
+                . "`nSaved product " completedCount ": " completedIdentity["productName"]
+                . "`nWaiting " Round(departmentCatalogueWaitMs / 1000, 1) " seconds before reading the catalogue accessibility tree..."
+                . "`nCtrl+Numpad6: stop before the next product starts"
+            Sleep departmentCatalogueWaitMs
+
+            if departmentStopAfterCurrent || !departmentAutomationEnabled {
+                LogText("department-stopped", "Department automation stopped after completing " completedCount " product(s), as requested.")
+                MsgBox "Department automation stopped safely after saving the current product.`n`nProducts completed: " completedCount
+                return true
+            }
+
+            nextResult := FindNextDepartmentCatalogueProduct(completedIdentity)
+            if departmentStopAfterCurrent || !departmentAutomationEnabled {
+                LogText("department-stopped", "Department automation stopped after completing " completedCount " product(s), as requested.")
+                MsgBox "Department automation stopped safely after saving the current product.`n`nProducts completed: " completedCount
+                return true
+            }
+            if nextResult["status"] = "end" {
+                LogText("department-complete", "Reached the final product exposed in the department accessibility tree after completing " completedCount " product(s).")
+                MsgBox "Department automation is complete.`n`nProducts completed: " completedCount "`nNo product follows the last completed item in the catalogue accessibility tree."
+                return true
+            }
+
+            currentIdentity := OpenAndVerifyNextDepartmentProduct(nextResult["product"], completedCount + 1)
+        }
+    } catch as err {
+        MsgBox "Department automation stopped.`n`nProducts completed: " completedCount "`n`n" err.Message
+        return false
+    } finally {
+        departmentAutomationActive := false
+        departmentStopAfterCurrent := false
+        ToolTip()
+    }
+}
+
+ReadOpenCmsProductIdentity() {
+    global cmsWinTitle
+    ActivateWindow(cmsWinTitle)
+    ClickPoint("overview_tab", 500)
+    productCode := CleanText(CopyOptionalFromPoint("stock_code"))
+    productName := CleanText(CopyFromPoint("product_name"))
+    if productName = ""
+        throw Error("The open GO b2b Product Name is blank. Start department automation from the first product's Overview page.")
+    return Map("productName", productName, "productCode", productCode)
+}
+
+PrepareCompletedProductForCatalogueLookup(originalIdentity) {
+    global cmsWinTitle
+    if !IsAnyMatrixMode()
+        return originalIdentity
+
+    ; Matrix insertion finishes inside the reopened parent. Read back its exact
+    ; post-update identity, then close/save it to return to the department list.
+    ActivateWindow(cmsWinTitle)
+    completedIdentity := ReadOpenCmsProductIdentity()
+    ToolTip "DEPARTMENT AUTOMATION RUNNING`nClosing the completed matrix parent and returning to the catalogue..."
+    ClickPoint("product_save_button", 500)
+    return completedIdentity
+}
+
+FindNextDepartmentCatalogueProduct(completedIdentity) {
+    global cmsWinTitle, departmentCatalogueTreeTimeoutMs
+    deadline := A_TickCount + departmentCatalogueTreeTimeoutMs
+    lastRowCount := 0
+    lastTreeProblem := ""
+
+    Loop {
+        ToolTip "DEPARTMENT AUTOMATION RUNNING"
+            . "`nReading the catalogue accessibility tree..."
+            . "`nFinding the row after: " completedIdentity["productName"]
+        try {
+            ActivateWindow(cmsWinTitle, 250)
+            document := UIA_Browser().GetCurrentDocumentElement()
+            products := CollectDepartmentCatalogueProducts(document)
+            lastRowCount := products.Length
+            currentIndex := FindCompletedDepartmentProductIndex(products, completedIdentity)
+            if currentIndex {
+                if currentIndex = products.Length
+                    return Map("status", "end")
+                return Map("status", "next", "product", products[currentIndex + 1])
+            }
+        } catch as err {
+            lastTreeProblem := err.Message
+        }
+
+        if A_TickCount >= deadline
+            throw Error(
+                "Could not find the completed product in the current catalogue accessibility tree."
+                . "`nCompleted product: " completedIdentity["productName"]
+                . "`nCompleted code: " EmptyToNA(completedIdentity["productCode"])
+                . "`nCatalogue product rows detected: " lastRowCount
+                . (lastTreeProblem != "" ? "`nLast accessibility error: " lastTreeProblem : "")
+                . "`n`nThe next product was not opened."
+            )
+        Sleep 500
+    }
+}
+
+CollectDepartmentCatalogueProducts(document) {
+    try {
+        catalogueList := document.FindElement({ AutomationId: "catalogueNodeListView" })
+        listItems := catalogueList.FindElements({ Type: "ListItem" })
+    } catch
+        return []
+
+    products := []
+    for _, listItem in listItems {
+        if !InStr(StrLower(listItem.ClassName), "cms-catalogue-tile")
+            continue
+        identity := ParseDepartmentCatalogueTileIdentity(listItem.Name)
+        if !identity
+            throw Error("A catalogue product tile could not be parsed safely: " listItem.Name)
+        editLink := FindCatalogueTileEditControl(listItem)
+        if !editLink
+            throw Error("A catalogue product tile has no usable Edit control: " identity["rowText"])
+        identity["rowElement"] := listItem
+        identity["editElement"] := editLink
+        products.Push(identity)
+    }
+    return products
+}
+
+ParseDepartmentCatalogueTileIdentity(rowText) {
+    text := RegExReplace(rowText, "[\x{E000}-\x{F8FF}]", " ")
+    text := RegExReplace(Trim(text), "[\r\n\t ]+", " ")
+    if !RegExMatch(text, "i)^(Simple Product|Matrix SKU|Matrix Product)\s+(.+?)\s+Edit$", &match)
+        return 0
+
+    productType := match[1]
+    body := Trim(match[2])
+    productCode := ""
+    productName := body
+    if StrLower(productType) != "matrix product" {
+        if !RegExMatch(body, "^(.+\S)\s+(\S+)$", &identityMatch)
+            return 0
+        productName := Trim(identityMatch[1])
+        productCode := Trim(identityMatch[2])
+    }
+    if productName = ""
+        return 0
+    return Map(
+        "productType", productType,
+        "productName", productName,
+        "productCode", productCode,
+        "rowText", text
+    )
+}
+
+FindCatalogueTileEditControl(listItem) {
+    try editControls := listItem.FindElements({ Name: "Edit", mm: 2, cs: 0 })
+    catch
+        return 0
+    for _, editControl in editControls {
+        try {
+            if StrLower(Trim(editControl.Name)) = "edit" && editControl.IsEnabled
+                return editControl
+        }
+    }
+    return 0
+}
+
+FindCompletedDepartmentProductIndex(products, completedIdentity) {
+    matches := []
+    for index, product in products {
+        if DepartmentCatalogueIdentityMatches(product, completedIdentity)
+            matches.Push(index)
+    }
+    if matches.Length > 1
+        throw Error("More than one catalogue row matched the completed product, so choosing the next product would be unsafe.")
+    return matches.Length = 1 ? matches[1] : 0
+}
+
+DepartmentCatalogueIdentityMatches(catalogueProduct, completedIdentity) {
+    completedCode := CleanText(completedIdentity["productCode"])
+    catalogueCode := CleanText(catalogueProduct["productCode"])
+    if completedCode != "" && catalogueCode != ""
+        return StrLower(completedCode) = StrLower(catalogueCode)
+    return NormaliseCatalogueProductName(catalogueProduct["productName"])
+        = NormaliseCatalogueProductName(completedIdentity["productName"])
+}
+
+OpenAndVerifyNextDepartmentProduct(product, productNumber) {
+    global cmsWinTitle, departmentProductOpenDelayMs, departmentCatalogueTreeTimeoutMs
+    ToolTip "DEPARTMENT AUTOMATION RUNNING"
+        . "`nOpening product " productNumber ": " product["productName"]
+        . "`nCode: " EmptyToNA(product["productCode"])
+        . "`nCtrl+Numpad6: stop after this product"
+
+    try {
+        product["editElement"].Invoke()
+    } catch as invokeError {
+        try {
+            product["rowElement"].ScrollIntoView()
+            Sleep 300
+            product["editElement"].Click()
+        } catch as clickError {
+            throw Error("Could not invoke the next catalogue Edit control through UI Automation.`n" invokeError.Message "`n" clickError.Message)
+        }
+    }
+
+    Sleep departmentProductOpenDelayMs
+    expectedIdentity := Map("productName", product["productName"], "productCode", product["productCode"])
+    deadline := A_TickCount + departmentCatalogueTreeTimeoutMs
+    lastOpenedIdentity := 0
+    Loop {
+        try {
+            actualIdentity := ReadOpenCmsProductIdentity()
+            lastOpenedIdentity := actualIdentity
+            if DepartmentCatalogueIdentityMatches(expectedIdentity, actualIdentity)
+                return actualIdentity
+        }
+        if A_TickCount >= deadline
+            break
+        ToolTip "DEPARTMENT AUTOMATION RUNNING"
+            . "`nWaiting for product " productNumber " Overview to become ready..."
+            . "`nExpected: " product["productName"]
+        Sleep 500
+    }
+
+    openedText := lastOpenedIdentity
+        ? lastOpenedIdentity["productName"] " (" EmptyToNA(lastOpenedIdentity["productCode"]) ")"
+        : "The Overview fields could not be read."
+    throw Error(
+        "The next Edit control did not open the expected product."
+        . "`nExpected: " product["productName"] " (" EmptyToNA(product["productCode"]) ")"
+        . "`nOpened: " openedText
+    )
 }
 
 ; ==========================================================
@@ -3220,7 +3592,7 @@ BuildMatrixImagePrompt(pageUrl) {
     parentDescription := CopyOptionalFromPoint("meta_description")
     parentImageCount := DetectAndSetImageCountFromImagesTab()
     if parentImageCount
-        if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+        if !TryCopyCmsImagesToChatGPT(false) && IsAutomaticWorkflowExecutionEnabled()
             throw Error("Full workflow automation stopped because the matrix parent images were not pasted into ChatGPT successfully.")
     ; Visiting the parent Images tab can leave Chromium's matrix-SKU UIA tree
     ; stale. Close and reopen the complete parent before the first SKU scan so
@@ -3251,7 +3623,7 @@ BuildMatrixImagePrompt(pageUrl) {
         }
         products[p]["imageCount"] := DetectAndSetImageCountFromImagesTab()
         if products[p]["imageCount"]
-            if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+            if !TryCopyCmsImagesToChatGPT(false) && IsAutomaticWorkflowExecutionEnabled()
                 throw Error("Full workflow automation stopped because images for matrix product " p " were not pasted into ChatGPT successfully.")
         ActivateWindow(cmsWinTitle)
         ClickPoint("matrix_child_cancel_button", 300)
@@ -3312,7 +3684,7 @@ BuildMatrixFullPrompt(pageUrl) {
     parentDescription := CopyOptionalFromPoint("meta_description")
     parentImageCount := DetectAndSetImageCountFromImagesTab()
     if parentImageCount
-        if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+        if !TryCopyCmsImagesToChatGPT(false) && IsAutomaticWorkflowExecutionEnabled()
             throw Error("Full workflow automation stopped because the matrix parent images were not pasted into ChatGPT successfully.")
     ; Rebuild the parent after inspecting its Images tab. The reopen helper
     ; returns on a fresh Matrix SKUs tab, ready for the first UIA lookup.
@@ -3345,7 +3717,7 @@ BuildMatrixFullPrompt(pageUrl) {
         products[p]["originalHtmlSnippet"] := CopyOptionalFromPoint("html_snippet")
         products[p]["imageCount"] := DetectAndSetImageCountFromImagesTab()
         if products[p]["imageCount"]
-            if !TryCopyCmsImagesToChatGPT(false) && IsFullWorkflowAutomationEnabled()
+            if !TryCopyCmsImagesToChatGPT(false) && IsAutomaticWorkflowExecutionEnabled()
                 throw Error("Full workflow automation stopped because images for matrix product " p " were not pasted into ChatGPT successfully.")
         ActivateWindow(cmsWinTitle)
         LogText("matrix_full-child-context", "Product " p ": " products[p]["productName"] "`nConnected SKU size: " products[p]["connectedSize"] "`nVariant: " products[p]["variantContext"] "`nSKU row: " products[p]["skuRowText"] "`nHTML:`n" products[p]["originalHtmlSnippet"])
