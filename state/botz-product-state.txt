@@ -1,15 +1,15 @@
 ﻿CROMARTIE_BOTZ_STATE_V3
-product_name	GLOSSY OCHRE 800ML
-stock_code	B95388
-match_code	9538
-folder	C:\BOTZ\9538 Glossy ochre
-product_md	C:\BOTZ\9538 Glossy ochre\product.md
-product_md_size	839
-product_md_modified	20260806131852
+product_name	MORNING DEW 800ML
+stock_code	B95408
+match_code	9540
+folder	C:\BOTZ\9540 Morning dew
+product_md	C:\BOTZ\9540 Morning dew\product.md
+product_md_size	829
+product_md_modified	20260806131857
 initial_gallery_count	0
-uploaded_count	0
+uploaded_count	3
 pending_image	0
 image_count	3
-image	1	C:\BOTZ\9538 Glossy ochre\images\9538_glossy-ochre_01.jpg	143634	20260806131851
-image	2	C:\BOTZ\9538 Glossy ochre\images\9538_glossy-ochre_02.jpg	185167	20260806131851
-image	3	C:\BOTZ\9538 Glossy ochre\images\9538_glossy-ochre_03.jpg	176985	20260806131852
+image	1	C:\BOTZ\9540 Morning dew\images\9540_morning-dew_01.jpg	81106	20260806131856
+image	2	C:\BOTZ\9540 Morning dew\images\9540_morning-dew_02.jpg	159984	20260806131857
+image	3	C:\BOTZ\9540 Morning dew\images\9540_morning-dew_03.jpg	139827	20260806131857

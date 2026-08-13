@@ -7,7 +7,7 @@ You must use these project files:
 - `cromartie_colour_glaze_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_colour_glaze_product_page_seo_guidance_updated.md`
 - `cromartie_flexible_cms_styling_guidance_updated.md`
-- `cromartie_colour_glaze_product_page_recurring_fixes_v15.md`
+- `cromartie_colour_glaze_product_page_recurring_fixes_v16.md`
 
 Use them as follows:
 

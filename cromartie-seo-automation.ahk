@@ -157,6 +157,7 @@ chatWakeDelayMs := 900
 chatPasteVerifyDelayMs := 900
 chatResponseCopyTimeoutMs := 5000
 chatResponseScrollNotches := 100
+chatResponseRecoveryPageCount := 2
 chatResponseCopyButtonPoint := [2230, 902]
 chatResponseInitialWaitMs := 120000
 chatResponsePollIntervalMs := 30000
@@ -1379,6 +1380,9 @@ StartDepartmentAutomation() {
     global departmentStopAfterCurrent, automaticWorkflowActive
     global departmentCatalogueWaitMs
 
+    ValidateSeoAutomationMode()
+    departmentWorkflowMode := GetSeoAutomationMode()
+
     if !departmentAutomationEnabled {
         MsgBox "Department automation is OFF.`n`nPress Ctrl+Alt+D to turn it on, open the first product's Overview tab, then press Ctrl+Numpad4."
         return false
@@ -1399,8 +1403,11 @@ StartDepartmentAutomation() {
         currentIdentity := ReadOpenCmsProductIdentity()
 
         Loop {
+            if GetSeoAutomationMode() != departmentWorkflowMode
+                throw Error("SeoAutomationMode changed during the department run. Restart the department so every product uses one consistent workflow.")
             productNumber := completedCount + 1
             ToolTip "DEPARTMENT AUTOMATION RUNNING"
+                . "`nWorkflow: " departmentWorkflowMode
                 . "`nProduct " productNumber ": " currentIdentity["productName"]
                 . "`nCode: " EmptyToNA(currentIdentity["productCode"])
                 . "`nPreparing the ChatGPT workflow..."
@@ -1739,13 +1746,23 @@ FindLatestChatGptResponseCopyButton(document) {
 
 TryCopyLatestChatGptResponseByCoordinates(&problem) {
     global chatgptWinTitle, chatResponseCopyTimeoutMs
-    global chatResponseScrollNotches, chatResponseCopyButtonPoint
+    global chatResponseScrollNotches, chatResponseRecoveryPageCount
+    global chatResponseCopyButtonPoint
     problem := ""
 
     try {
         ActivateWindow(chatgptWinTitle, 400)
         MouseMove chatResponseCopyButtonPoint[1], chatResponseCopyButtonPoint[2], 0
+
+        ; Moving up first repairs the occasional ChatGPT conversation viewport
+        ; state where a direct bottom scroll stops exposing response actions.
+        Send "{PgUp " chatResponseRecoveryPageCount "}"
+        Sleep 500
+
+        ; Keep the original large wheel-down pass, then travel two additional
+        ; page lengths so the latest response action settles into position.
         SendNativeMouseWheel(-1, chatResponseScrollNotches)
+        Send "{PgDn " chatResponseRecoveryPageCount "}"
         Sleep 900
 
         A_Clipboard := ""
@@ -3817,6 +3834,7 @@ DeriveVariantContext(productName, rowText) {
 
 PasteMatrixFullOutputToCms() {
     global cmsWinTitle, imageCountToProcess, imageTargets, activeMatrixParentProductName, useRecommendedProductName
+    global departmentAutomationActive
     state := LoadMatrixState("matrix_full")
     activeMatrixParentProductName := state["parentProductName"]
     ValidateMatrixStateImageTargets(state, imageTargets.Length)
@@ -3891,7 +3909,9 @@ PasteMatrixFullOutputToCms() {
     ToolTip()
     totalImages := GetMatrixTotalImageCount(state)
     nameStatus := useRecommendedProductName && IsUsableProductNameRecommendation(output["parentProductNameRecommendation"]) ? "Parent product name recommendation and metadata were pasted." : "Parent metadata was pasted; parent product name was left unchanged."
-    MsgBox "Matrix-full SEO complete.`nChild products: " state["productCount"] "`nParent images: " state["parentImageCount"] "`nChild HTML snippets updated: " state["productCount"] "`nTotal image records updated: " totalImages "`n" nameStatus "`nThe parent was saved/reopened by the matrix accessibility-tree recovery workflow."
+    completionMessage := "Matrix-full SEO complete.`nChild products: " state["productCount"] "`nParent images: " state["parentImageCount"] "`nChild HTML snippets updated: " state["productCount"] "`nTotal image records updated: " totalImages "`n" nameStatus "`nThe parent was saved/reopened by the matrix accessibility-tree recovery workflow."
+    if !departmentAutomationActive
+        MsgBox completionMessage
 }
 
 BuildMatrixFullParsedLog(output) {
@@ -3915,6 +3935,7 @@ InsertMatrixParentMetaFields(metaTitle, metaDescription) {
 
 PasteMatrixImageOutputToCms() {
     global cmsWinTitle, imageCountToProcess, imageTargets, activeMatrixParentProductName
+    global departmentAutomationActive
     state := LoadMatrixState()
     activeMatrixParentProductName := state["parentProductName"]
     ValidateMatrixStateImageTargets(state, imageTargets.Length)
@@ -3966,7 +3987,8 @@ PasteMatrixImageOutputToCms() {
     }
     ToolTip()
     total := GetMatrixTotalImageCount(state)
-    MsgBox "Matrix image SEO complete.`nProducts: " state["productCount"] "`nParent images: " state["parentImageCount"] "`nTotal image records: " total
+    if !departmentAutomationActive
+        MsgBox "Matrix image SEO complete.`nProducts: " state["productCount"] "`nParent images: " state["parentImageCount"] "`nTotal image records: " total
 }
 
 SaveMatrixState(state) {
