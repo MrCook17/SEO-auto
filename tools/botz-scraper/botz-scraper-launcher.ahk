@@ -2,7 +2,7 @@
 #SingleInstance Force
 Persistent
 
-global BotzOutputDirectory := "C:\BOTZ"
+global BotzOutputDirectory := "C:\BOTZ\stoneware"
 global BotzScriptPath := A_ScriptDir "\botz-scraper.js"
 
 A_TrayMenu.Add()
@@ -105,7 +105,7 @@ RunBotz(arguments, label)
 NodeIsAvailable()
 {
     try
-        return RunWait(A_ComSpec ' /D /C "where node >nul 2>nul"',, "Hide") = 0
+        return RunWait(A_ComSpec ' /D /C "where node >nul 2>nul"', , "Hide") = 0
     catch
         return false
 }

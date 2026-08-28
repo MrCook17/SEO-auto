@@ -47,7 +47,9 @@ chatgptWinTitle := "Colour & Glaze"
 ; "matrix_image" = image SEO for every child of one matrix product
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
 ; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
-SeoAutomationMode := "botz"
+; This is the fallback used by older settings files. Saving the
+; Ctrl+Shift+NumLock menu persists the selected mode across reloads.
+SeoAutomationMode := "full"
 
 promptDir := A_ScriptDir "\prompts"
 FullPromptTemplatePath := promptDir "\prompt-template.md"
@@ -55,7 +57,8 @@ MetadataPromptTemplatePath := promptDir "\prompt-template-metadata-only.md"
 ImageOnlyPromptTemplatePath := promptDir "\prompt-template-image-only.md"
 MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
 MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
-BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
+; BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
+BotzPromptTemplatePath := promptDir "\prompt-template-botz-engobes.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
@@ -67,20 +70,23 @@ matrixStateFilePath := stateDir "\matrix-image-state.txt"
 matrixFullStateFilePath := stateDir "\matrix-full-state.txt"
 botzStateFilePath := stateDir "\botz-product-state.txt"
 botzPromptSettingsFilePath := stateDir "\botz-prompt-settings.txt"
-botzRootDir := "C:\BOTZ"
+botzRootDir := "C:\BOTZ\engobes"
 botzFilePickerTimeoutMs := 10000
 botzChatPickerFolderLoadMs := 2500
 botzChatPickerSelectAllMs := 1500
 botzChatAttachmentSettleMs := 10000
 botzImagesTabLoadMs := 1500
 botzImageDetailsLoadMs := 2500
-matrixNavigationDelayMs := 4000
-matrixReturnDelayMs := 3000
+matrixNavigationDelayMs := 5000
+matrixReturnDelayMs := 5000
 matrixFullyReopenParentAfterReturn := true
-matrixParentReopenDelayMs := 2500
-matrixPageWaitTimeoutMs := 12000
+matrixParentReopenDelayMs := 5000
+matrixSkuTabSettleDelayMs := 5000
+matrixCatalogueSearchTimeoutMs := 20000
+matrixCatalogueScrollSettleDelayMs := 3000
+matrixPageWaitTimeoutMs := 20000
 matrixStableDurationMs := 1000
-matrixUiaSearchTimeoutMs := 7000
+matrixUiaSearchTimeoutMs := 15000
 matrixScrollWheelNotchesPerStep := 5
 matrixMaxScrollSteps := 30
 matrixNoNewRowsStopCount := 3
@@ -91,6 +97,7 @@ global botzPromptSettings := 0
 global botzPromptSettingsGui := 0
 global activeMatrixParentProductName := ""
 global activeCmsProductCode := ""
+global lastSavedNonMatrixProductIdentity := 0
 global automaticWorkflowActive := false
 global automaticWorkflowCancelRequested := false
 global automaticWorkflowManualCompletion := false
@@ -100,8 +107,8 @@ global departmentStopAfterCurrent := false
 global LastEditButtons := []
 global LastDocument := 0
 
-; Public product/category URL for {PAGE_URL} in the ChatGPT prompt. BOTZ mode
-; loads the saved value from state\botz-prompt-settings.txt at startup.
+; Public product/category URL for {PAGE_URL} in every ChatGPT prompt. All modes
+; load the shared saved value from state\botz-prompt-settings.txt at startup.
 botzDefaultPageUrl := "https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Botz-Earthenware-Glazes-800ml/..."
 hardcodedPageUrl := botzDefaultPageUrl
 
@@ -113,9 +120,9 @@ attemptImageCopyAfterPrompt := true
 ; Every workflow now replaces this automatically from the Image Gallery cards.
 imageCountToProcess := 1
 
-; Image/card coordinates on the Images tab.
-; Add more Map(...) entries here later if a department has more images.
-; Each entry needs:
+; Image/card coordinates for the five slots visible on each Images-tab page.
+; Global image indices are mapped to these reusable slots and the gallery's
+; Next button is used for image 6 and above. Each entry needs:
 ; - image: point on the image itself, used for copying/pasting into ChatGPT
 ; - details_button: the button that opens the image tags/details screen
 imageTargets := [
@@ -125,6 +132,12 @@ imageTargets := [
     Map("image", [1160, 459], "details_button", [1074, 551]), ; x: 1160, y: 459 x: 1074, y: 551
     Map("image", [1399, 459], "details_button", [1324, 552]) ; x: 1399, y: 459 x: 1324, y: 552
 ]
+imageGalleryPageSize := 5
+imageGalleryMaxPages := 100
+imageGalleryNextPageDelayMs := 800
+imageGalleryPreviousPageDelayMs := 800
+imageGalleryPageChangeTimeoutMs := 5000
+imageGalleryFirstPageNoChangeTimeoutMs := 2000
 
 ; High-quality image copy settings.
 ; Process used for each image:
@@ -157,10 +170,13 @@ chatWakeDelayMs := 900
 chatPasteVerifyDelayMs := 900
 chatResponseCopyTimeoutMs := 5000
 chatResponseScrollNotches := 100
-chatResponseRecoveryPageCount := 2
+chatResponseRecoveryPageUpCount := 2
+chatResponseRecoveryPageDownCount := 20
 chatResponseCopyButtonPoint := [2230, 902]
 chatResponseInitialWaitMs := 120000
 chatResponsePollIntervalMs := 30000
+imageOnlyChatResponseInitialWaitMs := 60000
+imageOnlyChatResponsePollIntervalMs := 15000
 
 ; Ctrl+Alt+A toggles this. Keep it off by default so Numpad4, NumpadEnter and
 ; Numpad6 retain their existing manual workflow until automation is requested.
@@ -196,6 +212,8 @@ coords := Map(
     ; Images tab
     "image", [399, 454],
     "image_details_button", [319, 555],
+    "image_gallery_previous_button", [309, 480],
+    "image_gallery_next_button", [1583, 476],
     "image_add_button", [307, 343],
     ; Image details page
     "image_name", [945, 555],
@@ -212,7 +230,7 @@ coords := Map(
 requiredInternalLinksDefault := "N/A"
 additionalProductNotesDefault := "N/A"
 
-InitialiseBotzPromptSettings()
+InitialiseSeoPromptSettings()
 
 ; ==========================================================
 ; HOTKEYS
@@ -231,7 +249,7 @@ Numpad4:: BuildPromptFromOpenProductPageAndPasteToChatGPT()
 ^!d:: ToggleDepartmentAutomation()
 ^Numpad4:: StartDepartmentAutomation()
 ^Numpad6:: RequestDepartmentStopAfterCurrent()
-^+NumLock:: OpenBotzPromptSettingsGui()
+^+NumLock:: OpenSeoPromptSettingsGui()
 ^0:: SetImageCountToProcess(0)
 ^1:: SetImageCountToProcess(1)
 ^2:: SetImageCountToProcess(2)
@@ -328,7 +346,7 @@ ToggleDepartmentAutomation() {
     if !departmentAutomationEnabled && departmentAutomationActive
         message .= "`nThe current product will finish, then the department run will stop."
     else if departmentAutomationEnabled
-        message .= "`nStart from the first product Overview with Ctrl+Numpad4."
+        message .= "`nStart from the first " GetDepartmentProductTypeForSeoMode() " Overview with Ctrl+Numpad4."
     Flash(message, 3000)
 }
 
@@ -344,15 +362,10 @@ RequestDepartmentStopAfterCurrent() {
 }
 
 SetImageCountToProcess(imageCount) {
-    global imageCountToProcess, imageTargets
+    global imageCountToProcess
 
     if imageCount < 0 {
         Flash("Image count cannot be negative.")
-        return false
-    }
-
-    if imageCount > imageTargets.Length {
-        MsgBox "Cannot set image count to " imageCount ".`n`nOnly " imageTargets.Length " image coordinate entries are configured in imageTargets."
         return false
     }
 
@@ -522,9 +535,31 @@ ValidateSeoAutomationMode() {
     global SeoAutomationMode
     mode := GetSeoAutomationMode()
 
-    if mode != "full" && mode != "metadata" && mode != "image" && mode != "matrix_image" && mode != "matrix_full" && mode != "botz" {
+    if !IsValidSeoAutomationMode(mode) {
         throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full' or 'botz'.")
     }
+}
+
+GetSeoAutomationModeOptions() {
+    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz"]
+}
+
+IsValidSeoAutomationMode(mode) {
+    normalisedMode := StrLower(Trim(mode))
+    for _, validMode in GetSeoAutomationModeOptions() {
+        if normalisedMode = validMode
+            return true
+    }
+    return false
+}
+
+GetSeoAutomationModeOptionIndex(mode) {
+    normalisedMode := StrLower(Trim(mode))
+    for index, validMode in GetSeoAutomationModeOptions() {
+        if normalisedMode = validMode
+            return index
+    }
+    return 1
 }
 
 GetSeoAutomationMode() {
@@ -558,6 +593,15 @@ IsBotzMode() {
 
 IsAnyMatrixMode() {
     return IsMatrixImageMode() || IsMatrixFullMode()
+}
+
+GetDepartmentProductTypeForSeoMode(mode := "") {
+    mode := mode != "" ? StrLower(Trim(mode)) : GetSeoAutomationMode()
+    if !IsValidSeoAutomationMode(mode)
+        throw Error("Cannot choose a department product type for invalid SEO mode '" mode "'.")
+    return mode = "matrix_image" || mode = "matrix_full"
+        ? "Matrix Product"
+        : "Simple Product"
 }
 
 GetPromptTemplatePath() {
@@ -791,16 +835,11 @@ SetClipboardText(text) {
 ; ==========================================================
 
 TryCopyCmsImagesToChatGPT(showResult := true) {
-    global imageCountToProcess, imageTargets
+    global imageCountToProcess
 
     try {
         if imageCountToProcess < 1
             return true
-
-        if imageCountToProcess > imageTargets.Length {
-            MsgBox "Image count is set to " imageCountToProcess ", but only " imageTargets.Length " image coordinate entries exist in imageTargets."
-            return false
-        }
 
         successCount := 0
 
@@ -862,7 +901,7 @@ CopyCmsImageToClipboard(imageIndex := 1) {
     global cmsWinTitle, imageContextCopyKey, copyHighQualityImagePreview, allowThumbnailImageCopyFallback
 
     ActivateWindow(cmsWinTitle)
-    ClickPoint("images_tab", 800)
+    OpenImageGalleryPageForIndex(imageIndex)
 
     ; Preferred method: click the configured image thumbnail/card, then copy
     ; the larger/high-quality preview image from highQualityImageCopyPoint.
@@ -985,12 +1024,151 @@ CopyImageByContextMenuKey(imageIndex, copyKey) {
 }
 
 GetImageTarget(imageIndex) {
-    global imageTargets
+    global imageTargets, imageGalleryPageSize
 
-    if imageIndex < 1 || imageIndex > imageTargets.Length
-        throw Error("Missing image target coordinates for image " imageIndex ". Add it to imageTargets or lower imageCountToProcess.")
+    if imageIndex < 1
+        throw Error("Image indices must start at 1; received " imageIndex ".")
+    if imageTargets.Length != imageGalleryPageSize
+        throw Error("imageTargets must contain exactly " imageGalleryPageSize " reusable gallery-slot coordinate entries.")
 
-    return imageTargets[imageIndex]
+    slotIndex := Mod(imageIndex - 1, imageGalleryPageSize) + 1
+    return imageTargets[slotIndex]
+}
+
+GetImageGalleryPageForIndex(imageIndex) {
+    global imageGalleryPageSize
+    if imageIndex < 1
+        throw Error("Image indices must start at 1; received " imageIndex ".")
+    return Floor((imageIndex - 1) / imageGalleryPageSize) + 1
+}
+
+OpenFirstImageGalleryPage() {
+    global imageTabLoadDelayMs, imageGalleryMaxPages
+
+    ; GO b2b preserves the current gallery page when the Images tab is clicked.
+    ; Walk backwards explicitly until Previous no longer changes the page.
+    ClickPoint("images_tab", imageTabLoadDelayMs)
+    Loop imageGalleryMaxPages {
+        if !TryReturnToPreviousImageGalleryPage()
+            return
+        if A_Index = imageGalleryMaxPages
+            throw Error("Could not return to the first Image Gallery page within the " imageGalleryMaxPages "-page safety limit.")
+    }
+}
+
+OpenImageGalleryPageForIndex(imageIndex) {
+    targetPage := GetImageGalleryPageForIndex(imageIndex)
+    OpenFirstImageGalleryPage()
+
+    if targetPage > 1 {
+        Loop targetPage - 1 {
+            if !TryAdvanceImageGalleryPage()
+                throw Error("Could not reach Image Gallery page " targetPage " for image " imageIndex ". The gallery ended on page " A_Index ".")
+        }
+    }
+}
+
+TryAdvanceImageGalleryPage() {
+    global imageGalleryNextPageDelayMs
+
+    return TryMoveImageGalleryPage(
+        "image_gallery_next_button",
+        "Next",
+        imageGalleryNextPageDelayMs
+    )
+}
+
+TryReturnToPreviousImageGalleryPage() {
+    global imageGalleryPreviousPageDelayMs, imageGalleryFirstPageNoChangeTimeoutMs
+
+    return TryMoveImageGalleryPage(
+        "image_gallery_previous_button",
+        "Previous",
+        imageGalleryPreviousPageDelayMs,
+        imageGalleryFirstPageNoChangeTimeoutMs
+    )
+}
+
+TryMoveImageGalleryPage(buttonCoordinateName, directionLabel, clickDelayMs, noChangeTimeoutMs := 0) {
+
+    document := UIA_Browser().GetCurrentDocumentElement()
+    gallery := FindImageGalleryScope(document)
+    if !gallery
+        throw Error("The Image Gallery scope was unavailable before clicking its " directionLabel " button.")
+    previousSnapshot := GetImageGalleryPageSnapshot(gallery)
+    buttonState := GetImageGalleryButtonState(buttonCoordinateName)
+    if buttonState = 0
+        return false
+
+    ClickPoint(buttonCoordinateName, clickDelayMs)
+    if WaitForImageGalleryPageChange(previousSnapshot, noChangeTimeoutMs)
+        return true
+
+    ; Retry once when UIA identified an enabled control. This handles a click
+    ; landing during a brief gallery rerender without mistaking it for an edge.
+    if buttonState = 1 {
+        ClickPoint(buttonCoordinateName, clickDelayMs)
+        if WaitForImageGalleryPageChange(previousSnapshot, noChangeTimeoutMs)
+            return true
+    }
+    return false
+}
+
+GetImageGalleryButtonState(buttonCoordinateName) {
+    global coords
+    point := coords[buttonCoordinateName]
+
+    try node := UIA.SmallestElementFromPoint(point[1], point[2])
+    catch
+        return -1
+
+    Loop 8 {
+        try {
+            if StrLower(GetUiaControlTypeText(node)) = "button"
+                return node.IsEnabled ? 1 : 0
+        }
+        try parent := UIA.TreeWalkerTrue.GetParentElement(node)
+        catch
+            return -1
+        if !parent
+            return -1
+        node := parent
+    }
+    return -1
+}
+
+GetImageGalleryPageSnapshot(gallery) {
+    try return gallery.DumpAll(" ", 10)
+    catch
+        return ""
+}
+
+WaitForImageGalleryPageChange(previousSnapshot, timeoutMs := 0) {
+    global imageGalleryPageChangeTimeoutMs
+    effectiveTimeoutMs := timeoutMs > 0 ? timeoutMs : imageGalleryPageChangeTimeoutMs
+    deadline := A_TickCount + effectiveTimeoutMs
+    changedSnapshot := ""
+    stableSince := 0
+
+    Loop {
+        try {
+            document := UIA_Browser().GetCurrentDocumentElement()
+            gallery := FindImageGalleryScope(document)
+            snapshot := gallery ? GetImageGalleryPageSnapshot(gallery) : ""
+            if snapshot != "" && snapshot != previousSnapshot {
+                if snapshot = changedSnapshot {
+                    if A_TickCount - stableSince >= 400
+                        return true
+                } else {
+                    changedSnapshot := snapshot
+                    stableSince := A_TickCount
+                }
+            }
+        }
+        if A_TickCount >= deadline
+            return false
+        Sleep 200
+    }
 }
 
 ClickCoordinates(point, delayMs := 250) {
@@ -1002,32 +1180,34 @@ ClickCoordinates(point, delayMs := 250) {
 }
 
 ValidateImageTargetConfig() {
-    global imageCountToProcess, imageTargets
+    global imageCountToProcess, imageTargets, imageGalleryPageSize, coords
 
     if imageCountToProcess < 0
         throw Error("imageCountToProcess cannot be negative.")
 
-    if imageCountToProcess > imageTargets.Length
-        throw Error("imageCountToProcess is set to " imageCountToProcess ", but imageTargets only contains " imageTargets.Length " image coordinate entries.")
+    if imageGalleryPageSize < 1 || imageTargets.Length != imageGalleryPageSize
+        throw Error("Image pagination requires exactly " imageGalleryPageSize " coordinate entries in imageTargets; found " imageTargets.Length ".")
+    if !coords.Has("image_gallery_previous_button") || !coords.Has("image_gallery_next_button")
+        throw Error("The Image Gallery Previous and Next button coordinates must both be configured.")
 }
 
-; Opens the Images tab and updates imageCountToProcess from the accessibility
-; tree. Each genuine gallery card has one exact-name Remove button, so this
-; remains correct when labels jump from (for example) Image 2 to Image 4.
+; Opens the Images tab and updates imageCountToProcess from one stable
+; accessibility-tree scan. GO b2b exposes all gallery cards to UIA, including
+; cards on later five-image visual pages, so scanning and summing each page
+; would count the same cards repeatedly. Each genuine card has one exact-name
+; Remove button, which also remains correct when visible image labels skip.
 DetectAndSetImageCountFromImagesTab(expectedCount := -1) {
-    global imageCountToProcess, imageTargets, imageTabLoadDelayMs
+    global imageCountToProcess
 
-    ClickPoint("images_tab", imageTabLoadDelayMs)
+    ValidateImageTargetConfig()
+    OpenFirstImageGalleryPage()
     detectedCount := WaitForStableImageGalleryCount()
-
-    if detectedCount > imageTargets.Length
-        throw Error("The Images tab contains " detectedCount " image(s), but imageTargets only has " imageTargets.Length " coordinate entries. Add more image targets before continuing.")
 
     if expectedCount >= 0 && detectedCount != expectedCount
         throw Error("Image count changed or differs between matrix children: expected " expectedCount ", detected " detectedCount ".")
 
     imageCountToProcess := detectedCount
-    LogText("image-count-detected", "UIA-v2 detected " detectedCount " Image Gallery card(s).")
+    LogText("image-count-detected", "UIA-v2 detected " detectedCount " total Image Gallery card(s) in one stable scan, including cards on later visual pages.")
     return detectedCount
 }
 
@@ -1137,6 +1317,7 @@ RunManualChatGptOutputPaste() {
 
 PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
     global cmsWinTitle, useRecommendedProductName, imageCountToProcess
+    global lastSavedNonMatrixProductIdentity
 
     try {
         EnsureFolders()
@@ -1164,9 +1345,10 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
         ActivateWindow(cmsWinTitle)
         ClearActiveCmsProductCode()
         ClickPoint("overview_tab", 500)
-        SetActiveCmsProductCode(CopyFromPoint("stock_code"))
-        DetectAndSetImageCountFromImagesTab()
-
+        currentProductCode := SetActiveCmsProductCode(CopyFromPoint("stock_code"))
+        completedProductName := CleanText(CopyFromPoint("product_name"))
+        if completedProductName = ""
+            throw Error("The current GO b2b Product Name is blank, so the completed product cannot be identified safely.")
         response := A_Clipboard
 
         if !InStr(response, "===AUTOMATION_OUTPUT_START===") {
@@ -1188,6 +1370,7 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
         htmlSnippet := output["htmlSnippet"]
         imageTitles := output["imageTitles"]
         imageAlts := output["imageAlts"]
+        imageNames := output["imageNames"]
 
         LogText("chatgpt-output", response)
         LogText("automation-block", block)
@@ -1206,6 +1389,12 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
         ; Optional Overview tab: paste product name recommendation
         if !IsImageOnlyMode() && useRecommendedProductName && IsUsableProductNameRecommendation(productNameRecommendation) {
             InsertProductNameRecommendation(productNameRecommendation)
+            ; Keep the exact value accepted by GO b2b. Department automation
+            ; must find the renamed catalogue row, not the pre-update name that
+            ; was captured before the ChatGPT workflow began.
+            completedProductName := CleanText(CopyFromPoint("product_name"))
+            if completedProductName = ""
+                throw Error("The updated Product Name could not be read back from GO b2b.")
         }
 
         ; Description tab: paste meta fields. Full mode also pastes the HTML/product description field.
@@ -1213,12 +1402,17 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
             InsertMetaFields(metaTitle, metaDescription, htmlSnippet)
 
         ; Images tab: open each image details page and paste image metadata
-        InsertImageSeoFields(imageTitles, imageAlts)
+        InsertImageSeoFields(imageTitles, imageAlts, imageNames)
 
         ; Save every ordinary workflow after all metadata and requested image
         ; records have been updated.
-        if IsFullMode() || IsMetadataOnlyMode() || IsImageOnlyMode()
+        if IsFullMode() || IsMetadataOnlyMode() || IsImageOnlyMode() {
+            lastSavedNonMatrixProductIdentity := Map(
+                "productName", completedProductName,
+                "productCode", currentProductCode
+            )
             ClickPoint("product_save_button", 1000)
+        }
 
         if IsFullMode()
             Flash("SEO fields pasted and product saved.")
@@ -1307,9 +1501,12 @@ SubmitChatGptDraftForAutomaticWorkflow(forceAutomation := false) {
 
 WaitForAutomaticChatGptOutput(forceAutomation := false) {
     global chatResponseInitialWaitMs, chatResponsePollIntervalMs
+    global imageOnlyChatResponseInitialWaitMs, imageOnlyChatResponsePollIntervalMs
 
     startedAt := A_TickCount
-    nextAttemptAt := startedAt + chatResponseInitialWaitMs
+    initialWaitMs := IsImageOnlyMode() ? imageOnlyChatResponseInitialWaitMs : chatResponseInitialWaitMs
+    pollIntervalMs := IsImageOnlyMode() ? imageOnlyChatResponsePollIntervalMs : chatResponsePollIntervalMs
+    nextAttemptAt := startedAt + initialWaitMs
     attempt := 0
     lastProblem := ""
 
@@ -1360,7 +1557,7 @@ WaitForAutomaticChatGptOutput(forceAutomation := false) {
             return true
         }
 
-        nextAttemptAt := A_TickCount + chatResponsePollIntervalMs
+        nextAttemptAt := A_TickCount + pollIntervalMs
     }
 }
 
@@ -1379,12 +1576,14 @@ StartDepartmentAutomation() {
     global departmentAutomationEnabled, departmentAutomationActive
     global departmentStopAfterCurrent, automaticWorkflowActive
     global departmentCatalogueWaitMs
+    global lastSavedNonMatrixProductIdentity
 
     ValidateSeoAutomationMode()
     departmentWorkflowMode := GetSeoAutomationMode()
+    departmentProductType := GetDepartmentProductTypeForSeoMode(departmentWorkflowMode)
 
     if !departmentAutomationEnabled {
-        MsgBox "Department automation is OFF.`n`nPress Ctrl+Alt+D to turn it on, open the first product's Overview tab, then press Ctrl+Numpad4."
+        MsgBox "Department automation is OFF.`n`nPress Ctrl+Alt+D to turn it on, open the first " departmentProductType " Overview tab, then press Ctrl+Numpad4."
         return false
     }
     if departmentAutomationActive {
@@ -1401,6 +1600,14 @@ StartDepartmentAutomation() {
     completedCount := 0
     try {
         currentIdentity := ReadOpenCmsProductIdentity()
+        SetActiveDepartmentProductIdentity(currentIdentity)
+        LogText(
+            "department-started",
+            "Department automation started."
+            . "`nWorkflow: " departmentWorkflowMode
+            . "`nCatalogue product type: " departmentProductType
+            . "`nFirst product: " currentIdentity["productName"]
+        )
 
         Loop {
             if GetSeoAutomationMode() != departmentWorkflowMode
@@ -1408,11 +1615,15 @@ StartDepartmentAutomation() {
             productNumber := completedCount + 1
             ToolTip "DEPARTMENT AUTOMATION RUNNING"
                 . "`nWorkflow: " departmentWorkflowMode
+                . "`nProduct type: " departmentProductType
                 . "`nProduct " productNumber ": " currentIdentity["productName"]
                 . "`nCode: " EmptyToNA(currentIdentity["productCode"])
                 . "`nPreparing the ChatGPT workflow..."
                 . "`nCtrl+Numpad6: stop after this product"
 
+            ; Prevent a failed or interrupted product from reusing the previous
+            ; product's post-save identity.
+            lastSavedNonMatrixProductIdentity := 0
             if !RunOpenProductWorkflow(true)
                 throw Error("The automatic workflow did not complete product " productNumber " ('" currentIdentity["productName"] "').")
 
@@ -1443,15 +1654,15 @@ StartDepartmentAutomation() {
                 return true
             }
 
-            nextResult := FindNextDepartmentCatalogueProduct(completedIdentity)
+            nextResult := FindNextDepartmentCatalogueProduct(completedIdentity, departmentProductType)
             if departmentStopAfterCurrent || !departmentAutomationEnabled {
                 LogText("department-stopped", "Department automation stopped after completing " completedCount " product(s), as requested.")
                 MsgBox "Department automation stopped safely after saving the current product.`n`nProducts completed: " completedCount
                 return true
             }
             if nextResult["status"] = "end" {
-                LogText("department-complete", "Reached the final product exposed in the department accessibility tree after completing " completedCount " product(s).")
-                MsgBox "Department automation is complete.`n`nProducts completed: " completedCount "`nNo product follows the last completed item in the catalogue accessibility tree."
+                LogText("department-complete", "Reached the final " departmentProductType " exposed in the department accessibility tree after completing " completedCount " product(s).")
+                MsgBox "Department automation is complete.`n`nProduct type: " departmentProductType "`nProducts completed: " completedCount "`nNo matching product follows the last completed item in the catalogue accessibility tree."
                 return true
             }
 
@@ -1471,17 +1682,42 @@ ReadOpenCmsProductIdentity() {
     global cmsWinTitle
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
-    productCode := CleanText(CopyOptionalFromPoint("stock_code"))
+    productType := IsAnyMatrixMode() ? "Matrix Product" : "Simple Product"
+    ; Matrix parents do not have stock codes. Do not read the stock-code
+    ; coordinate at all: their department identity is always their exact name.
+    productCode := productType = "Matrix Product"
+        ? ""
+        : CleanText(CopyOptionalFromPoint("stock_code"))
     productName := CleanText(CopyFromPoint("product_name"))
     if productName = ""
         throw Error("The open GO b2b Product Name is blank. Start department automation from the first product's Overview page.")
-    return Map("productName", productName, "productCode", productCode)
+    return Map("productType", productType, "productName", productName, "productCode", productCode)
+}
+
+SetActiveDepartmentProductIdentity(identity) {
+    ; The department-started log is written before the product workflow has a
+    ; chance to initialise its own artifact identity. Seed it here using the
+    ; same rule as catalogue matching: matrix parent name, otherwise code.
+    productType := identity.Has("productType") ? StrLower(Trim(identity["productType"])) : ""
+    artifactIdentity := productType = "matrix product"
+        ? identity["productName"]
+        : identity["productCode"]
+    return SetActiveCmsProductCode(artifactIdentity)
 }
 
 PrepareCompletedProductForCatalogueLookup(originalIdentity) {
     global cmsWinTitle
-    if !IsAnyMatrixMode()
-        return originalIdentity
+    global lastSavedNonMatrixProductIdentity
+    if !IsAnyMatrixMode() {
+        if !IsObject(lastSavedNonMatrixProductIdentity)
+            return originalIdentity
+
+        originalCode := CleanText(originalIdentity["productCode"])
+        savedCode := CleanText(lastSavedNonMatrixProductIdentity["productCode"])
+        if originalCode = "" || savedCode = "" || StrLower(originalCode) != StrLower(savedCode)
+            throw Error("The saved post-update product identity does not match the product that began this department step.")
+        return lastSavedNonMatrixProductIdentity
+    }
 
     ; Matrix insertion finishes inside the reopened parent. Read back its exact
     ; post-update identity, then close/save it to return to the department list.
@@ -1492,7 +1728,7 @@ PrepareCompletedProductForCatalogueLookup(originalIdentity) {
     return completedIdentity
 }
 
-FindNextDepartmentCatalogueProduct(completedIdentity) {
+FindNextDepartmentCatalogueProduct(completedIdentity, departmentProductType) {
     global cmsWinTitle, departmentCatalogueTreeTimeoutMs
     deadline := A_TickCount + departmentCatalogueTreeTimeoutMs
     lastRowCount := 0
@@ -1501,11 +1737,12 @@ FindNextDepartmentCatalogueProduct(completedIdentity) {
     Loop {
         ToolTip "DEPARTMENT AUTOMATION RUNNING"
             . "`nReading the catalogue accessibility tree..."
+            . "`nProduct type: " departmentProductType
             . "`nFinding the row after: " completedIdentity["productName"]
         try {
             ActivateWindow(cmsWinTitle, 250)
             document := UIA_Browser().GetCurrentDocumentElement()
-            products := CollectDepartmentCatalogueProducts(document)
+            products := CollectDepartmentCatalogueProducts(document, departmentProductType)
             lastRowCount := products.Length
             currentIndex := FindCompletedDepartmentProductIndex(products, completedIdentity)
             if currentIndex {
@@ -1522,7 +1759,7 @@ FindNextDepartmentCatalogueProduct(completedIdentity) {
                 "Could not find the completed product in the current catalogue accessibility tree."
                 . "`nCompleted product: " completedIdentity["productName"]
                 . "`nCompleted code: " EmptyToNA(completedIdentity["productCode"])
-                . "`nCatalogue product rows detected: " lastRowCount
+                . "`nCatalogue " departmentProductType " rows detected: " lastRowCount
                 . (lastTreeProblem != "" ? "`nLast accessibility error: " lastTreeProblem : "")
                 . "`n`nThe next product was not opened."
             )
@@ -1530,7 +1767,7 @@ FindNextDepartmentCatalogueProduct(completedIdentity) {
     }
 }
 
-CollectDepartmentCatalogueProducts(document) {
+CollectDepartmentCatalogueProducts(document, departmentProductType := "") {
     try {
         catalogueList := document.FindElement({ AutomationId: "catalogueNodeListView" })
         listItems := catalogueList.FindElements({ Type: "ListItem" })
@@ -1542,8 +1779,22 @@ CollectDepartmentCatalogueProducts(document) {
         if !InStr(StrLower(listItem.ClassName), "cms-catalogue-tile")
             continue
         identity := ParseDepartmentCatalogueTileIdentity(listItem.Name)
-        if !identity
+        if !identity {
+            ; A catalogue list can contain links to child departments alongside
+            ; its actual products. They use the same cms-catalogue-tile class,
+            ; but must not participate in product ordering or next-product
+            ; selection. BOTZ lists did not expose these structural rows, which
+            ; is why the same department loop worked there.
+            if IsCatalogueDepartmentTile(listItem.Name)
+                continue
             throw Error("A catalogue product tile could not be parsed safely: " listItem.Name)
+        }
+        ; Department runs operate on one product class only. Matrix modes use
+        ; Matrix Product parents; ordinary and BOTZ modes use Simple Products.
+        ; Filtering before next-row selection makes interleaved Matrix SKU rows
+        ; invisible to the run instead of opening and trying to optimise them.
+        if departmentProductType != "" && StrLower(identity["productType"]) != StrLower(departmentProductType)
+            continue
         editLink := FindCatalogueTileEditControl(listItem)
         if !editLink
             throw Error("A catalogue product tile has no usable Edit control: " identity["rowText"])
@@ -1552,6 +1803,12 @@ CollectDepartmentCatalogueProducts(document) {
         products.Push(identity)
     }
     return products
+}
+
+IsCatalogueDepartmentTile(rowText) {
+    text := RegExReplace(rowText, "[\x{E000}-\x{F8FF}]", " ")
+    text := RegExReplace(Trim(text), "[\r\n\t ]+", " ")
+    return RegExMatch(text, "i)^Department\s+.+\s+Edit$")
 }
 
 ParseDepartmentCatalogueTileIdentity(rowText) {
@@ -1593,6 +1850,231 @@ FindCatalogueTileEditControl(listItem) {
     return 0
 }
 
+FindVisibleExactNamedControlPoint(searchRoot, controlName, referencePoint, scopeLabel) {
+    try elements := searchRoot.FindElements({ Name: controlName, mm: 2, cs: 0 })
+    catch
+        return 0
+    best := 0
+    bestDistance := 0
+    for _, element in elements {
+        try {
+            exposedName := RegExReplace(element.Name, "[\x{E000}-\x{F8FF}]", " ")
+            exposedName := RegExReplace(Trim(exposedName), "[\r\n\t ]+", " ")
+            if StrLower(exposedName) != StrLower(Trim(controlName))
+                continue
+            if !element.IsEnabled || element.IsOffscreen
+                continue
+            rect := element.Location
+            if rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.y < 0
+                continue
+            point := {
+                X: Round(rect.x),
+                Y: Round(rect.y),
+                W: Round(rect.w),
+                H: Round(rect.h),
+                CentreX: Round(rect.x + rect.w / 2),
+                CentreY: Round(rect.y + rect.h / 2),
+                ScopeLabel: scopeLabel
+            }
+            distance := ((point.CentreX - referencePoint[1]) ** 2) + ((point.CentreY - referencePoint[2]) ** 2)
+            if !best || distance < bestDistance {
+                best := point
+                bestDistance := distance
+            }
+        }
+    }
+    return best
+}
+
+WaitForVisibleExactNamedControlPoint(controlName, referencePoint, timeoutMs := 5000) {
+    global cmsWinTitle, matrixStableDurationMs
+    deadline := A_TickCount + timeoutMs
+    priorSignature := ""
+    stableSince := 0
+    Loop {
+        point := 0
+        try {
+            ActivateWindow(cmsWinTitle, 100)
+            browser := UIA_Browser(cmsWinTitle)
+            document := browser.GetCurrentDocumentElement()
+            point := FindVisibleExactNamedControlPoint(document, controlName, referencePoint, "current browser document")
+            if !point
+                point := FindVisibleExactNamedControlPoint(browser.BrowserElement, controlName, referencePoint, "complete Chrome window")
+        }
+        if point {
+            signature := point.X "," point.Y "," point.W "," point.H
+            if signature = priorSignature {
+                if stableSince && A_TickCount - stableSince >= matrixStableDurationMs
+                    return point
+            } else {
+                priorSignature := signature
+                stableSince := A_TickCount
+            }
+        } else {
+            priorSignature := ""
+            stableSince := 0
+        }
+        if A_TickCount >= deadline
+            return 0
+        Sleep 250
+    }
+}
+
+PhysicallyClickMatrixParentSave(delayMs, requireLiveSaveControl := false) {
+    global coords
+    referencePoint := coords["product_save_button"]
+    savePoint := WaitForVisibleExactNamedControlPoint("Save", referencePoint, 5000)
+    ToolTip()
+    if savePoint {
+        MouseMove savePoint.CentreX, savePoint.CentreY, 0
+        Sleep 250
+        Click savePoint.CentreX, savePoint.CentreY
+        Sleep delayMs
+        return savePoint
+    }
+    if requireLiveSaveControl
+        return 0
+
+    ; Retain the configured coordinate only as an initial fallback for GO b2b
+    ; versions which do not expose the Save button to UIA. It is never used for
+    ; a retry, because the catalogue may already be open by then.
+    ClickPoint("product_save_button", delayMs)
+    return {
+        X: referencePoint[1],
+        Y: referencePoint[2],
+        W: 0,
+        H: 0,
+        CentreX: referencePoint[1],
+        CentreY: referencePoint[2],
+        ScopeLabel: "configured fallback coordinate"
+    }
+}
+
+FindExactCatalogueMatrixParent(searchRoot, productName, fallbackScopeLabel := "current browser document") {
+    targetName := NormaliseCatalogueProductName(productName)
+    matches := []
+    catalogueScope := searchRoot
+    scopeLabel := fallbackScopeLabel
+    try {
+        catalogueScope := searchRoot.FindElement({ AutomationId: "catalogueNodeListView" })
+        scopeLabel := "catalogueNodeListView"
+    }
+    ; Chrome sometimes drops the Kendo list container itself during a rebuild
+    ; while its cms-catalogue-tile descendants remain in the UIA tree. Search
+    ; all ListItems in the supplied root when that container is absent.
+    try listItems := catalogueScope.FindElements({ Type: "ListItem" })
+    catch as err
+        throw Error("Catalogue ListItems could not be read from " scopeLabel ".`n" err.Message)
+
+    for _, listItem in listItems {
+        try rowClass := listItem.ClassName
+        catch
+            continue
+        if !InStr(StrLower(rowClass), "cms-catalogue-tile")
+            continue
+        try rowName := listItem.Name
+        catch
+            continue
+        identity := ParseDepartmentCatalogueTileIdentity(rowName)
+        if !identity
+            continue
+        if StrLower(identity["productType"]) != "matrix product"
+            continue
+        if NormaliseCatalogueProductName(identity["productName"]) != targetName
+            continue
+        editElement := FindCatalogueTileEditControl(listItem)
+        if !editElement
+            throw Error("The exact Matrix Product row has no enabled child Edit link: " identity["rowText"])
+        matches.Push(Map(
+            "identity", identity,
+            "rowElement", listItem,
+            "editElement", editElement,
+            "scopeLabel", scopeLabel
+        ))
+    }
+
+    if matches.Length > 1
+        throw Error("More than one Matrix Product row exactly matched '" productName "', so a physical click would be unsafe.")
+    return matches.Length = 1 ? matches[1] : 0
+}
+
+WaitForCatalogueMatrixParentEditPoint(productName, timeoutMs) {
+    global cmsWinTitle, matrixCatalogueScrollSettleDelayMs, matrixStableDurationMs
+    deadline := A_TickCount + timeoutMs
+    priorSignature := ""
+    stableSince := 0
+    lastProblem := ""
+
+    Loop {
+        try {
+            ActivateWindow(cmsWinTitle, 100)
+            browser := UIA_Browser(cmsWinTitle)
+            document := browser.GetCurrentDocumentElement()
+            match := FindExactCatalogueMatrixParent(document, productName)
+            ; GetCurrentDocumentElement can briefly select a transitional
+            ; Chrome Document. The complete browser window is a second,
+            ; independent search root and can still expose the catalogue rows.
+            if !match
+                match := FindExactCatalogueMatrixParent(browser.BrowserElement, productName, "complete Chrome window")
+            if !match {
+                lastProblem := "No exact Matrix Product row was exposed in the current Document or the complete Chrome window."
+                priorSignature := ""
+                stableSince := 0
+            } else {
+                editElement := match["editElement"]
+                if editElement.IsOffscreen {
+                    ; UIA is used only to reveal and measure the exact row. It
+                    ; never invokes or clicks the Edit control.
+                    match["rowElement"].ScrollIntoView()
+                    ToolTip "Bringing the exact matrix parent Edit button into view...`n" productName
+                    Sleep matrixCatalogueScrollSettleDelayMs
+                    priorSignature := ""
+                    stableSince := 0
+                    continue
+                }
+
+                rect := editElement.Location
+                if rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.y < 0 {
+                    lastProblem := "The exact row was found, but its child Edit link had no usable screen rectangle."
+                    priorSignature := ""
+                    stableSince := 0
+                } else {
+                    point := {
+                        X: Round(rect.x),
+                        Y: Round(rect.y),
+                        W: Round(rect.w),
+                        H: Round(rect.h),
+                        CentreX: Round(rect.x + rect.w / 2),
+                        CentreY: Round(rect.y + rect.h / 2),
+                        RowText: match["identity"]["rowText"],
+                        ScopeLabel: match["scopeLabel"]
+                    }
+                    signature := point.X "," point.Y "," point.W "," point.H
+                    if signature = priorSignature {
+                        if stableSince && A_TickCount - stableSince >= matrixStableDurationMs
+                            return point
+                    } else {
+                        priorSignature := signature
+                        stableSince := A_TickCount
+                    }
+                    lastProblem := "The exact Edit rectangle was still moving while the catalogue loaded."
+                }
+            }
+        } catch as err {
+            lastProblem := err.Message
+            priorSignature := ""
+            stableSince := 0
+        }
+
+        if A_TickCount >= deadline
+            throw Error(
+                "Could not obtain a stable physical-click location for Matrix Product '" productName "' from the live accessibility tree."
+                . (lastProblem != "" ? "`nLast accessibility problem: " lastProblem : "")
+            )
+        Sleep 250
+    }
+}
+
 FindCompletedDepartmentProductIndex(products, completedIdentity) {
     matches := []
     for index, product in products {
@@ -1605,6 +2087,12 @@ FindCompletedDepartmentProductIndex(products, completedIdentity) {
 }
 
 DepartmentCatalogueIdentityMatches(catalogueProduct, completedIdentity) {
+    catalogueType := catalogueProduct.Has("productType") ? StrLower(Trim(catalogueProduct["productType"])) : ""
+    completedType := completedIdentity.Has("productType") ? StrLower(Trim(completedIdentity["productType"])) : ""
+    if catalogueType = "matrix product" || completedType = "matrix product"
+        return NormaliseCatalogueProductName(catalogueProduct["productName"])
+            = NormaliseCatalogueProductName(completedIdentity["productName"])
+
     completedCode := CleanText(completedIdentity["productCode"])
     catalogueCode := CleanText(catalogueProduct["productCode"])
     if completedCode != "" && catalogueCode != ""
@@ -1620,20 +2108,40 @@ OpenAndVerifyNextDepartmentProduct(product, productNumber) {
         . "`nCode: " EmptyToNA(product["productCode"])
         . "`nCtrl+Numpad6: stop after this product"
 
+    ; Accessibility is used only to identify and, if necessary, expose the
+    ; correct row. The Edit button itself is always pressed with a real mouse
+    ; move/click; UIA Invoke/Click is deliberately not used here.
     try {
-        product["editElement"].Invoke()
-    } catch as invokeError {
-        try {
+        if product["editElement"].IsOffscreen {
             product["rowElement"].ScrollIntoView()
-            Sleep 300
-            product["editElement"].Click()
-        } catch as clickError {
-            throw Error("Could not invoke the next catalogue Edit control through UI Automation.`n" invokeError.Message "`n" clickError.Message)
+            Sleep 1000
         }
+
+        ; Scrolling can rebuild the Kendo list and stale the original element.
+        ; Reacquire the matching row, then use only its current rectangle.
+        document := UIA_Browser().GetCurrentDocumentElement()
+        liveProducts := CollectDepartmentCatalogueProducts(document, product["productType"])
+        liveIndex := FindCompletedDepartmentProductIndex(liveProducts, product)
+        if !liveIndex
+            throw Error("The matching catalogue row disappeared before its physical click.")
+        liveProduct := liveProducts[liveIndex]
+        if liveProduct["editElement"].IsOffscreen
+            throw Error("The matching Edit button remained off-screen after scrolling.")
+        rect := liveProduct["editElement"].Location
+        if rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.y < 0
+            throw Error("The live Edit button has no usable screen rectangle.")
+        editX := Round(rect.x + rect.w / 2)
+        editY := Round(rect.y + rect.h / 2)
+        MouseMove editX, editY, 0
+        Sleep 200
+        Click editX, editY
+        Sleep 750
+    } catch as clickError {
+        throw Error("Could not physically click the next catalogue Edit button.`n" clickError.Message)
     }
 
     Sleep departmentProductOpenDelayMs
-    expectedIdentity := Map("productName", product["productName"], "productCode", product["productCode"])
+    expectedIdentity := Map("productType", product["productType"], "productName", product["productName"], "productCode", product["productCode"])
     deadline := A_TickCount + departmentCatalogueTreeTimeoutMs
     lastOpenedIdentity := 0
     Loop {
@@ -1746,7 +2254,8 @@ FindLatestChatGptResponseCopyButton(document) {
 
 TryCopyLatestChatGptResponseByCoordinates(&problem) {
     global chatgptWinTitle, chatResponseCopyTimeoutMs
-    global chatResponseScrollNotches, chatResponseRecoveryPageCount
+    global chatResponseScrollNotches
+    global chatResponseRecoveryPageUpCount, chatResponseRecoveryPageDownCount
     global chatResponseCopyButtonPoint
     problem := ""
 
@@ -1756,13 +2265,13 @@ TryCopyLatestChatGptResponseByCoordinates(&problem) {
 
         ; Moving up first repairs the occasional ChatGPT conversation viewport
         ; state where a direct bottom scroll stops exposing response actions.
-        Send "{PgUp " chatResponseRecoveryPageCount "}"
+        Send "{PgUp " chatResponseRecoveryPageUpCount "}"
         Sleep 500
 
-        ; Keep the original large wheel-down pass, then travel two additional
-        ; page lengths so the latest response action settles into position.
+        ; Keep the original large wheel-down pass, then travel much farther down
+        ; than the short recovery move so long responses expose their Copy action.
         SendNativeMouseWheel(-1, chatResponseScrollNotches)
-        Send "{PgDn " chatResponseRecoveryPageCount "}"
+        Send "{PgDn " chatResponseRecoveryPageDownCount "}"
         Sleep 900
 
         A_Clipboard := ""
@@ -1860,6 +2369,8 @@ InsertMetaFields(metaTitle, metaDescription, htmlSnippet := "") {
 }
 
 InsertImageSeoFields(imageTitles, imageAlts, imageNames := 0) {
+    if imageTitles.Length
+        BeginSequentialImageMetadataInsertion(imageTitles.Length)
     Loop imageTitles.Length {
         imageName := imageNames && imageNames.Length >= A_Index ? imageNames[A_Index] : ""
         PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index], imageName)
@@ -1870,11 +2381,30 @@ InsertImageSeoFields(imageTitles, imageAlts, imageNames := 0) {
 ; IMAGE METADATA PASTE HELPERS
 ; ==========================================================
 
+BeginSequentialImageMetadataInsertion(imageCount) {
+    global imageGalleryPageSize, imageGalleryPreviousPageDelayMs, imageTabLoadDelayMs
+
+    if imageCount < 1
+        return
+
+    ; Do not inspect UIA while entering tags. The gallery retains its last page,
+    ; so click Previous enough times to guarantee page 1 for this image count.
+    ClickPoint("images_tab", imageTabLoadDelayMs)
+    pagesToRewind := Ceil(imageCount / imageGalleryPageSize) - 1
+    if pagesToRewind > 0 {
+        Loop pagesToRewind
+            ClickPoint("image_gallery_previous_button", imageGalleryPreviousPageDelayMs)
+    }
+}
+
 PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt, imageName := "") {
-    global imageTabLoadDelayMs
+    global imageGalleryPageSize, imageGalleryNextPageDelayMs
     target := GetImageTarget(imageIndex)
 
-    ClickPoint("images_tab", imageTabLoadDelayMs)
+    ; Image cards are ordered left-to-right in groups of five. Image 6, 11,
+    ; 16, etc. moves to the next page and reuses the first configured slot.
+    if imageIndex > 1 && Mod(imageIndex - 1, imageGalleryPageSize) = 0
+        ClickPoint("image_gallery_next_button", imageGalleryNextPageDelayMs)
     ClickCoordinates(target["details_button"], 1000)
     if imageName != ""
         PasteToPoint("image_name", imageName)
@@ -2210,11 +2740,23 @@ ClearActiveCmsProductCode() {
     activeCmsProductCode := ""
 }
 
+SetActiveMatrixParentName(expectedName := "") {
+    ; Matrix parents have no stock code, so their exact Product Name is also
+    ; used as the safe identity for logs, backups and page verification.
+    parentName := CleanText(CopyFromPoint("product_name"))
+    if parentName = ""
+        throw Error("The matrix parent Product Name is blank.")
+    if expectedName != "" && NormaliseCatalogueProductName(parentName) != NormaliseCatalogueProductName(expectedName)
+        throw Error("The open matrix parent does not match the saved product name.`nExpected: " expectedName "`nOpened: " parentName)
+    SetActiveCmsProductCode(parentName)
+    return parentName
+}
+
 SetActiveCmsProductCode(productCode) {
     global activeCmsProductCode
     productCode := CleanText(productCode)
     if productCode = ""
-        throw Error("The GO b2b product code is blank, so product-specific logs and backups cannot be named safely.")
+        throw Error("The GO b2b product identity is blank, so product-specific logs and backups cannot be named safely.")
     activeCmsProductCode := productCode
     return productCode
 }
@@ -2228,14 +2770,14 @@ GetActiveCmsProductCodeFilePart() {
     global activeCmsProductCode
     productCode := CleanText(activeCmsProductCode)
     if productCode = ""
-        throw Error("The exact GO b2b product code has not been collected, so a log or backup cannot be created.")
+        throw Error("The exact GO b2b product identity has not been collected, so a log or backup cannot be created.")
 
     ; Preserve the exact CMS value unless Windows forbids one of its characters
     ; in a filename. Normal GO b2b stock codes such as B91018 are unchanged.
     filePart := RegExReplace(productCode, "[<>:`"/\\|?*\x00-\x1F]", "_")
     filePart := RTrim(filePart, " .")
     if filePart = ""
-        throw Error("The GO b2b product code cannot be represented in a Windows filename: " productCode)
+        throw Error("The GO b2b product identity cannot be represented in a Windows filename: " productCode)
     return filePart
 }
 
@@ -2281,31 +2823,35 @@ BackupText(prefix, text) {
 }
 
 ; ==========================================================
-; BOTZ PROMPT SETTINGS
+; SHARED SEO PROMPT SETTINGS
 ; ==========================================================
 
-InitialiseBotzPromptSettings() {
-    global botzPromptSettings, hardcodedPageUrl, botzPromptSettingsFilePath
-
-    if !IsBotzMode() {
-        botzPromptSettings := CreateDefaultBotzPromptSettings()
-        return
-    }
+InitialiseSeoPromptSettings() {
+    global botzPromptSettings, botzPromptSettingsFilePath
 
     try {
         botzPromptSettings := LoadBotzPromptSettings()
-        hardcodedPageUrl := botzPromptSettings["pageUrl"]
+        ApplySharedSeoPromptSettings(botzPromptSettings)
     } catch as err {
         botzPromptSettings := CreateDefaultBotzPromptSettings()
-        hardcodedPageUrl := botzPromptSettings["pageUrl"]
-        MsgBox "The saved BOTZ prompt settings could not be loaded, so the built-in defaults are being used.`n`nFile: " botzPromptSettingsFilePath "`n`n" err.Message
+        ApplySharedSeoPromptSettings(botzPromptSettings)
+        MsgBox "The saved SEO prompt settings could not be loaded, so the built-in defaults are being used.`n`nFile: " botzPromptSettingsFilePath "`n`n" err.Message
     }
+}
+
+ApplySharedSeoPromptSettings(settings) {
+    global SeoAutomationMode, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault
+    SeoAutomationMode := settings["seoAutomationMode"]
+    hardcodedPageUrl := settings["pageUrl"]
+    requiredInternalLinksDefault := BuildBotzRecommendedInlinks(settings)
+    additionalProductNotesDefault := settings["additionalNotes"] != "" ? settings["additionalNotes"] : "NONE"
 }
 
 CreateDefaultBotzPromptSettings() {
     global botzDefaultPageUrl
 
     return Map(
+        "seoAutomationMode", GetSeoAutomationMode(),
         "pageUrl", botzDefaultPageUrl,
         "inlink1Name", "",
         "inlink1Url", "",
@@ -2316,13 +2862,8 @@ CreateDefaultBotzPromptSettings() {
     )
 }
 
-OpenBotzPromptSettingsGui() {
+OpenSeoPromptSettingsGui() {
     global botzPromptSettings, botzPromptSettingsGui
-
-    if !IsBotzMode() {
-        MsgBox "BOTZ prompt settings are available only while SeoAutomationMode is set to 'botz'."
-        return
-    }
 
     if IsObject(botzPromptSettingsGui) {
         try {
@@ -2336,13 +2877,18 @@ OpenBotzPromptSettingsGui() {
     if !IsObject(botzPromptSettings)
         botzPromptSettings := CreateDefaultBotzPromptSettings()
 
-    settingsGui := Gui("+AlwaysOnTop +OwnDialogs", "BOTZ Prompt Settings")
+    settingsGui := Gui("+AlwaysOnTop +OwnDialogs", "SEO Prompt Settings")
     settingsGui.MarginX := 16
     settingsGui.MarginY := 14
     settingsGui.SetFont("s10", "Segoe UI")
 
     controls := Map()
-    settingsGui.AddText("xm", "Cromartie page URL (hardcodedPageUrl)")
+    settingsGui.AddText("xm", "SEO automation mode")
+    controls["seoAutomationMode"] := settingsGui.AddDropDownList("xm y+4 w260", GetSeoAutomationModeOptions())
+    controls["seoAutomationMode"].Choose(GetSeoAutomationModeOptionIndex(GetSeoAutomationMode()))
+    settingsGui.AddText("xm y+6 w700", "Department runs: matrix modes process Matrix Product rows; all other modes process Simple Product rows.")
+
+    settingsGui.AddText("xm y+14", "Cromartie page URL")
     controls["pageUrl"] := settingsGui.AddEdit("xm y+4 w700", botzPromptSettings["pageUrl"])
 
     settingsGui.SetFont("s10 Bold")
@@ -2364,20 +2910,21 @@ OpenBotzPromptSettingsGui() {
 
     saveButton := settingsGui.AddButton("xm y+16 w100 Default", "Save")
     cancelButton := settingsGui.AddButton("x+10 yp w100", "Cancel")
-    saveButton.OnEvent("Click", SaveBotzPromptSettingsFromGui.Bind(settingsGui, controls))
-    cancelButton.OnEvent("Click", CloseBotzPromptSettingsGui.Bind(settingsGui))
-    settingsGui.OnEvent("Close", CloseBotzPromptSettingsGui)
-    settingsGui.OnEvent("Escape", CloseBotzPromptSettingsGui)
+    saveButton.OnEvent("Click", SaveSeoPromptSettingsFromGui.Bind(settingsGui, controls))
+    cancelButton.OnEvent("Click", CloseSeoPromptSettingsGui.Bind(settingsGui))
+    settingsGui.OnEvent("Close", CloseSeoPromptSettingsGui)
+    settingsGui.OnEvent("Escape", CloseSeoPromptSettingsGui)
 
     botzPromptSettingsGui := settingsGui
     settingsGui.Show("AutoSize Center")
-    controls["pageUrl"].Focus()
+    controls["seoAutomationMode"].Focus()
 }
 
-SaveBotzPromptSettingsFromGui(settingsGui, controls, *) {
-    global botzPromptSettings, hardcodedPageUrl
+SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
+    global botzPromptSettings, departmentAutomationActive, automaticWorkflowActive
 
     settings := Map(
+        "seoAutomationMode", StrLower(Trim(controls["seoAutomationMode"].Text)),
         "pageUrl", Trim(controls["pageUrl"].Value),
         "inlink1Name", Trim(controls["inlink1Name"].Value),
         "inlink1Url", Trim(controls["inlink1Url"].Value),
@@ -2389,17 +2936,19 @@ SaveBotzPromptSettingsFromGui(settingsGui, controls, *) {
 
     try {
         ValidateBotzPromptSettings(settings)
+        if (departmentAutomationActive || automaticWorkflowActive) && settings["seoAutomationMode"] != GetSeoAutomationMode()
+            throw Error("SeoAutomationMode cannot be changed while an automatic workflow is active. Stop or finish the current run first.")
         SaveBotzPromptSettings(settings)
         botzPromptSettings := settings
-        hardcodedPageUrl := settings["pageUrl"]
-        CloseBotzPromptSettingsGui(settingsGui)
-        Flash("BOTZ prompt settings saved.", 2000)
+        ApplySharedSeoPromptSettings(settings)
+        CloseSeoPromptSettingsGui(settingsGui)
+        Flash("SEO prompt settings saved.`nMode: " settings["seoAutomationMode"], 2500)
     } catch as err {
-        MsgBox "BOTZ prompt settings were not saved.`n`n" err.Message
+        MsgBox "SEO prompt settings were not saved.`n`n" err.Message
     }
 }
 
-CloseBotzPromptSettingsGui(settingsGui, *) {
+CloseSeoPromptSettingsGui(settingsGui, *) {
     global botzPromptSettingsGui
 
     try settingsGui.Destroy()
@@ -2407,10 +2956,12 @@ CloseBotzPromptSettingsGui(settingsGui, *) {
 }
 
 ValidateBotzPromptSettings(settings) {
+    if !settings.Has("seoAutomationMode") || !IsValidSeoAutomationMode(settings["seoAutomationMode"])
+        throw Error("Select a valid SEO automation mode.")
     if settings["pageUrl"] = ""
-        throw Error("The hardcodedPageUrl box cannot be blank.")
+        throw Error("The Cromartie page URL cannot be blank.")
     if !IsBotzHttpUrl(settings["pageUrl"])
-        throw Error("hardcodedPageUrl must be a complete http:// or https:// URL without spaces.")
+        throw Error("The Cromartie page URL must be a complete http:// or https:// URL without spaces.")
 
     Loop 2 {
         index := A_Index
@@ -2433,6 +2984,7 @@ SaveBotzPromptSettings(settings) {
     ValidateBotzPromptSettings(settings)
     EnsureFolders()
     text := "CROMARTIE_BOTZ_PROMPT_SETTINGS_V1`n"
+    text .= "seo_automation_mode`t" EncodeStateValue(settings["seoAutomationMode"]) "`n"
     text .= "page_url`t" EncodeStateValue(settings["pageUrl"]) "`n"
     text .= "inlink_1_name`t" EncodeStateValue(settings["inlink1Name"]) "`n"
     text .= "inlink_1_url`t" EncodeStateValue(settings["inlink1Url"]) "`n"
@@ -2484,6 +3036,11 @@ LoadBotzPromptSettings() {
             throw Error("The BOTZ prompt settings file is missing: " fileKey ".")
         settings[settingKey] := values[fileKey]
     }
+    ; Files saved before the mode dropdown existed remain valid and retain the
+    ; configured SeoAutomationMode from the top of this script until next save.
+    settings["seoAutomationMode"] := values.Has("seo_automation_mode")
+        ? StrLower(Trim(values["seo_automation_mode"]))
+        : GetSeoAutomationMode()
     ValidateBotzPromptSettings(settings)
     return settings
 }
@@ -2547,7 +3104,7 @@ BuildBotzPrompt(pageUrl) {
         if !FileExist(BotzPromptTemplatePath)
             throw Error("The BOTZ prompt template was not found: " BotzPromptTemplatePath)
         if !IsObject(botzPromptSettings)
-            InitialiseBotzPromptSettings()
+            InitialiseSeoPromptSettings()
         prompt := BuildBotzPromptFromSource(
             FileRead(BotzPromptTemplatePath, "UTF-8"),
             pageUrl,
@@ -3045,6 +3602,7 @@ LoadBotzState() {
 
 PasteBotzOutputToCms() {
     global cmsWinTitle, useRecommendedProductName
+    global lastSavedNonMatrixProductIdentity
 
     try {
         ClearActiveCmsProductCode()
@@ -3061,9 +3619,18 @@ PasteBotzOutputToCms() {
         VerifyBotzCmsProduct(state, output)
         UploadAndPopulateBotzImages(state, output)
 
-        if useRecommendedProductName && IsUsableProductNameRecommendation(output["productNameRecommendation"])
+        completedProductName := state["productName"]
+        if useRecommendedProductName && IsUsableProductNameRecommendation(output["productNameRecommendation"]) {
             InsertProductNameRecommendation(output["productNameRecommendation"])
+            completedProductName := CleanText(CopyFromPoint("product_name"))
+            if completedProductName = ""
+                throw Error("The updated BOTZ Product Name could not be read back from GO b2b.")
+        }
         InsertMetaFields(output["metaTitle"], output["metaDescription"], output["htmlSnippet"])
+        lastSavedNonMatrixProductIdentity := Map(
+            "productName", completedProductName,
+            "productCode", state["stockCode"]
+        )
         ClickPoint("product_save_button", 1000)
 
         LogText("botz-product-complete", "Completed BOTZ Product Creation for '" state["productName"] "' (" state["stockCode"] ") with " state["imageCount"] " image(s).")
@@ -3157,7 +3724,7 @@ ParseBotzAutomationOutput(block, state) {
     imageNames := [], imageTitles := [], imageAlts := []
     Loop state["imageCount"] {
         i := A_Index
-        imageName := ValidateBotzImageName(fields["IMAGE_" i "_NAME"], i)
+        imageName := ValidateCmsImageName(fields["IMAGE_" i "_NAME"], i)
         imageTitle := ValidateImageOutputValue(fields["IMAGE_" i "_TITLE"], "Image " i " title")
         imageAlt := ValidateImageOutputValue(fields["IMAGE_" i "_ALT"], "Image " i " alt text")
         if NormaliseHarmlessWhitespace(imageName) = NormaliseHarmlessWhitespace(imageTitle) || NormaliseHarmlessWhitespace(imageName) = NormaliseHarmlessWhitespace(imageAlt)
@@ -3221,7 +3788,7 @@ ParseOrderedAutomationFields(block, expectedLabels) {
     return fields
 }
 
-ValidateBotzImageName(value, imageIndex) {
+ValidateCmsImageName(value, imageIndex) {
     value := ValidateImageOutputValue(value, "Image " imageIndex " name")
     if InStr(value, "\") || InStr(value, "/") || RegExMatch(value, "i)\.(jpe?g|png|webp)$")
         throw Error("Image " imageIndex " Name looks like a file path or filename. It must be a clean CMS image name.")
@@ -3342,13 +3909,14 @@ UploadAndPopulateSingleBotzImage(state, imagePath, imageIndex, totalImages, outp
 ; ==========================================================
 
 InjectImageOnlyOutputFields(prompt, imageCount) {
-    fields := BuildAutomationImageOutputBlock(imageCount)
+    fields := BuildAutomationImageOutputBlock(imageCount, true)
     return StrReplace(StrReplace(prompt, "{{IMAGE_COUNT}}", imageCount), "{{IMAGE_AUTOMATION_OUTPUT_FIELDS}}", fields)
 }
 
 ParseImageOnlyOutput(block, imageCount) {
     expected := ["MODE", "IMAGE_COUNT"]
     Loop imageCount {
+        expected.Push("IMAGE_" A_Index "_NAME")
         expected.Push("IMAGE_" A_Index "_TITLE")
         expected.Push("IMAGE_" A_Index "_ALT")
     }
@@ -3357,15 +3925,18 @@ ParseImageOnlyOutput(block, imageCount) {
         throw Error("Image output MODE must be IMAGE_ONLY.")
     if !IsInteger(fields["IMAGE_COUNT"]) || Integer(fields["IMAGE_COUNT"]) != imageCount
         throw Error("Image output count does not match imageCountToProcess (" imageCount ").")
-    titles := [], alts := []
+    names := [], titles := [], alts := []
     Loop imageCount {
+        name := ValidateCmsImageName(fields["IMAGE_" A_Index "_NAME"], A_Index)
         title := ValidateImageOutputValue(fields["IMAGE_" A_Index "_TITLE"], "Image " A_Index " title")
         alt := ValidateImageOutputValue(fields["IMAGE_" A_Index "_ALT"], "Image " A_Index " alt")
-        if StrLower(title) = StrLower(alt)
+        if NormaliseHarmlessWhitespace(name) = NormaliseHarmlessWhitespace(title) || NormaliseHarmlessWhitespace(name) = NormaliseHarmlessWhitespace(alt)
+            throw Error("Image " A_Index " Name must be distinct from its Title and Alt text.")
+        if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
             throw Error("Image " A_Index " title and alt text are identical.")
-        titles.Push(title), alts.Push(alt)
+        names.Push(name), titles.Push(title), alts.Push(alt)
     }
-    return Map("productNameRecommendation", "", "metaTitle", "", "metaDescription", "", "htmlSnippet", "", "imageNames", [], "imageTitles", titles, "imageAlts", alts)
+    return Map("productNameRecommendation", "", "metaTitle", "", "metaDescription", "", "htmlSnippet", "", "imageNames", names, "imageTitles", titles, "imageAlts", alts)
 }
 
 ParseExactLineFields(block, expectedLabels) {
@@ -3600,8 +4171,7 @@ BuildMatrixImagePrompt(pageUrl) {
     ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
-    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
-    parentName := CopyFromPoint("product_name")
+    parentName := SetActiveMatrixParentName()
     activeMatrixParentProductName := parentName
     ClickPoint("description_tab", 600)
     parentTitle := CopyOptionalFromPoint("meta_title")
@@ -3631,7 +4201,9 @@ BuildMatrixImagePrompt(pageUrl) {
     ; read independently because matrix children need not share an image count.
     Loop productCount {
         p := A_Index
-        controls := ReacquireAndValidateMatrixOrder(products)
+        ; The initial discovery tree is still fresh for child 1. Every later
+        ; child gets one new tree after the parent has been fully reopened.
+        controls := p = 1 ? initial : ReacquireAndValidateMatrixOrder(products)
         ClickMatrixEditButton(controls["buttons"][p])
         WaitForChildProductPage(p, productCount)
         if p = 1 {
@@ -3693,8 +4265,7 @@ BuildMatrixFullPrompt(pageUrl) {
     ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
-    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
-    parentName := CopyFromPoint("product_name")
+    parentName := SetActiveMatrixParentName()
     activeMatrixParentProductName := parentName
     ClickPoint("description_tab", 600)
     parentTitle := CopyOptionalFromPoint("meta_title")
@@ -3707,12 +4278,12 @@ BuildMatrixFullPrompt(pageUrl) {
     ; returns on a fresh Matrix SKUs tab, ready for the first UIA lookup.
     ActivateWindow(cmsWinTitle)
     FullyReopenActiveMatrixParent()
-    controls := ReacquireMatrixSkuControls(0)
-    productCount := controls["buttons"].Length
+    initial := ReacquireMatrixSkuControls(0)
+    productCount := initial["buttons"].Length
     products := []
     Loop productCount {
         p := A_Index
-        rowText := NormaliseMatrixRowText(controls["buttons"][p].RowText)
+        rowText := NormaliseMatrixRowText(initial["buttons"][p].RowText)
         exactName := ExtractMatrixProductNameFromRow(rowText, p)
         connectedSize := ExtractConnectedMatrixSkuSize(rowText)
         products.Push(Map("index", p, "productName", exactName, "connectedSize", connectedSize, "variantContext", ExtractMatrixVariantFromRow(rowText, exactName), "skuRowText", rowText, "originalHtmlSnippet", "", "imageCount", 0))
@@ -3723,7 +4294,8 @@ BuildMatrixFullPrompt(pageUrl) {
     ; Chrome's accessibility tree in a broken/stale state.
     Loop productCount {
         p := A_Index
-        controls := ReacquireAndValidateMatrixOrder(products)
+        ; Do not build a second tree in the same SKU menu before child 1.
+        controls := p = 1 ? initial : ReacquireAndValidateMatrixOrder(products)
         ClickMatrixEditButton(controls["buttons"][p])
         WaitForChildProductPage(p, productCount)
         ClickPoint("overview_tab", 400)
@@ -3755,6 +4327,7 @@ BuildMatrixFullPrompt(pageUrl) {
 }
 
 BuildMatrixFullPromptFromState(template, pageUrl, metaTitle, metaDescription, state) {
+    global requiredInternalLinksDefault, additionalProductNotesDefault
     productsText := "", mapping := "", outputFields := "", attachment := 0, bt := Chr(96)
     parentCount := state["parentImageCount"]
     Loop parentCount {
@@ -3784,6 +4357,8 @@ BuildMatrixFullPromptFromState(template, pageUrl, metaTitle, metaDescription, st
         "{{MATRIX_PRODUCTS}}", Trim(productsText),
         "{{ATTACHMENT_ORDER}}", Trim(mapping),
         "{{IMAGE_NOTES}}", BuildMatrixImageCountSummary(state),
+        "{{REQUIRED_INTERNAL_LINKS}}", requiredInternalLinksDefault,
+        "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotesDefault,
         "{{MATRIX_AUTOMATION_OUTPUT_FIELDS}}", outputFields
     )
     prompt := template
@@ -3808,11 +4383,15 @@ BuildMatrixImageCountSummary(state) {
 }
 
 ValidateMatrixStateImageTargets(state, availableTargets) {
-    if state["parentImageCount"] > availableTargets
-        throw Error("Saved matrix parent needs " state["parentImageCount"] " image target(s), but only " availableTargets " are configured.")
+    global imageGalleryPageSize, imageGalleryMaxPages
+    if availableTargets != imageGalleryPageSize
+        throw Error("Matrix image pagination requires " imageGalleryPageSize " reusable gallery targets; found " availableTargets ".")
+    maximumImages := imageGalleryPageSize * imageGalleryMaxPages
+    if state["parentImageCount"] > maximumImages
+        throw Error("Saved matrix parent image count exceeds the pagination safety limit of " maximumImages ".")
     for p, product in state["products"] {
-        if product["imageCount"] > availableTargets
-            throw Error("Saved matrix product " p " needs " product["imageCount"] " image target(s), but only " availableTargets " are configured.")
+        if product["imageCount"] > maximumImages
+            throw Error("Saved matrix product " p " image count exceeds the pagination safety limit of " maximumImages ".")
     }
 }
 
@@ -3841,7 +4420,7 @@ PasteMatrixFullOutputToCms() {
     ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
-    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
+    activeMatrixParentProductName := SetActiveMatrixParentName(state["parentProductName"])
     response := A_Clipboard
     block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
     if block = ""
@@ -3864,8 +4443,8 @@ PasteMatrixFullOutputToCms() {
     }
     InsertMatrixParentMetaFields(output["parentMetaTitle"], output["parentMetaDescription"])
     if state["parentImageCount"] {
-        detectedParentCount := DetectAndSetImageCountFromImagesTab(state["parentImageCount"])
-        Loop detectedParentCount
+        BeginSequentialImageMetadataInsertion(state["parentImageCount"])
+        Loop state["parentImageCount"]
             PasteImageMetadataToCms(A_Index, output["parentImageTitles"][A_Index], output["parentImageAlts"][A_Index])
     }
 
@@ -3885,7 +4464,6 @@ PasteMatrixFullOutputToCms() {
             if NormaliseHarmlessWhitespace(currentName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
                 throw Error("current child name no longer matches saved product '" state["products"][p]["productName"] "'; found '" currentName "'.")
             childImageCount := state["products"][p]["imageCount"]
-            DetectAndSetImageCountFromImagesTab(childImageCount)
             ClickPoint("description_tab", 600)
             ; Child matrix SKUs must inherit metadata from the parent matrix
             ; page. Explicitly clear any legacy child-level metadata before
@@ -3893,6 +4471,8 @@ PasteMatrixFullOutputToCms() {
             PasteToPoint("meta_title", "")
             PasteToPoint("meta_description", "")
             PasteToPoint("html_snippet", output["products"][p]["htmlSnippet"])
+            if childImageCount
+                BeginSequentialImageMetadataInsertion(childImageCount)
             Loop childImageCount {
                 i := A_Index
                 ToolTip "Matrix-full product " p " of " state["productCount"] "`nPasting image SEO " i " of " childImageCount
@@ -3942,7 +4522,7 @@ PasteMatrixImageOutputToCms() {
     ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ClickPoint("overview_tab", 500)
-    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
+    activeMatrixParentProductName := SetActiveMatrixParentName(state["parentProductName"])
     response := A_Clipboard
     block := ExtractBetween(response, "===AUTOMATION_OUTPUT_START===", "===AUTOMATION_OUTPUT_END===")
     if block = ""
@@ -3950,20 +4530,20 @@ PasteMatrixImageOutputToCms() {
     output := ParseMatrixImageOutput(block, state)
     LogText("matrix_image-chatgpt-output", response)
     if state["parentImageCount"] {
-        DetectAndSetImageCountFromImagesTab(state["parentImageCount"])
+        BeginSequentialImageMetadataInsertion(state["parentImageCount"])
         Loop state["parentImageCount"]
             PasteImageMetadataToCms(A_Index, output["parentImageTitles"][A_Index], output["parentImageAlts"][A_Index])
     }
     ; Saving/reopening also guarantees a fresh matrix accessibility tree after
     ; parent-image detail edits.
     FullyReopenActiveMatrixParent()
-    ; Scan once at the start of the insertion stage. This validates the child
-    ; count and stores fresh screen coordinates, but no UIA lookup is performed
-    ; after any child Save transition.
-    controls := ReacquireMatrixSkuControls(state["productCount"])
+    ; Each child now receives exactly one fresh SKU-tree scan after the parent
+    ; has been fully closed and reopened. Never reuse coordinates from the
+    ; previous parent-menu instance.
     Loop state["productCount"] {
         p := A_Index
         try {
+            controls := ReacquireAndValidateMatrixOrder(state["products"])
             ClickMatrixEditButton(controls["buttons"][p])
             WaitForChildProductPage(p, state["productCount"])
             ClickPoint("overview_tab", 400)
@@ -3971,7 +4551,8 @@ PasteMatrixImageOutputToCms() {
             if NormaliseHarmlessWhitespace(currentName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
                 throw Error("current child name no longer matches saved product " p " ('" state["products"][p]["productName"] "').")
             childImageCount := state["products"][p]["imageCount"]
-            DetectAndSetImageCountFromImagesTab(childImageCount)
+            if childImageCount
+                BeginSequentialImageMetadataInsertion(childImageCount)
             Loop childImageCount {
                 i := A_Index
                 ToolTip "Matrix product " p " of " state["productCount"] "`nPasting image SEO " i " of " childImageCount
@@ -4084,23 +4665,45 @@ DecodeStateValue(value) {
 ; ==========================================================
 
 ReacquireMatrixSkuControls(expectedCount := 0) {
-    global matrixUiaSearchTimeoutMs, matrixStableDurationMs, LastDocument, LastEditButtons
-    ShowMatrixLookupStatus("Reading Chrome accessibility tree...")
+    global matrixUiaSearchTimeoutMs, matrixStableDurationMs, matrixSkuTabSettleDelayMs
+    global LastDocument, LastEditButtons
+    lastProblem := ""
     try {
-        result := WaitForMatrixModalScope(matrixUiaSearchTimeoutMs)
-        document := result["document"]
-        scope := result["scope"]
-        LastDocument := document
-        if !scope
-            throw Error("No matrix SKU Edit controls with Name/StockCode row context became available within " matrixUiaSearchTimeoutMs " ms. Press F9 to dump the current accessibility tree.")
-        ShowMatrixLookupStatus("Collecting all SKU rows while scrolling...")
-        buttons := CollectAllMatrixSkuButtons(scope)
-        LastEditButtons := buttons
-        if buttons.Length = 0
-            throw Error("No matrix child Edit controls were detected. Press F9 for an accessibility-tree dump.")
-        if expectedCount && buttons.Length != expectedCount
-            throw Error("Matrix child count changed: expected " expectedCount ", detected " buttons.Length ".")
-        return Map("document", document, "scope", scope, "buttons", buttons)
+        Loop 2 {
+            attempt := A_Index
+            ShowMatrixLookupStatus("Reading Chrome accessibility tree...`nAttempt " attempt " of 2")
+            try {
+                result := WaitForMatrixModalScope(matrixUiaSearchTimeoutMs)
+                document := result["document"]
+                scope := result["scope"]
+                LastDocument := document
+                if !scope
+                    throw Error("No stable matrix SKU rows became available within " matrixUiaSearchTimeoutMs " ms.")
+
+                ShowMatrixLookupStatus("Collecting all SKU rows while scrolling...`nAttempt " attempt " of 2")
+                buttons := CollectAllMatrixSkuButtons(scope)
+                LastEditButtons := buttons
+                if buttons.Length = 0
+                    throw Error("The matrix scope appeared, but its child Edit controls had not finished rebuilding.")
+                if expectedCount && buttons.Length != expectedCount
+                    throw Error("Matrix child count is not stable: expected " expectedCount ", detected " buttons.Length ".")
+                return Map("document", document, "scope", scope, "buttons", buttons)
+            } catch as err {
+                lastProblem := err.Message
+                LastDocument := 0
+                LastEditButtons := []
+            }
+
+            if attempt = 1 {
+                ShowMatrixLookupStatus("Matrix SKU page was not stable yet.`nWaiting five seconds before retrying...")
+                Sleep matrixSkuTabSettleDelayMs
+            }
+        }
+        throw Error(
+            "Matrix child controls were still unavailable after two stable-tree attempts."
+            . (lastProblem != "" ? "`nLast problem: " lastProblem : "")
+            . "`nPress F9 for an accessibility-tree dump."
+        )
     } finally {
         ToolTip()
     }
@@ -4539,19 +5142,42 @@ FindCurrentMatrixSkuButton(item) {
 }
 
 WaitForMatrixModalScope(timeoutMs) {
+    global matrixStableDurationMs
     deadline := A_TickCount + timeoutMs
+    priorSignature := ""
+    stableSince := 0
     Loop {
-        ShowMatrixLookupStatus("Waiting for the matrix SKU accessibility tree...")
+        ShowMatrixLookupStatus("Waiting for stable matrix SKU rows...")
         try {
             document := UIA_Browser().GetCurrentDocumentElement()
             scope := FindMatrixModalScope(document)
-            if scope
-                return Map("document", document, "scope", scope, "headingFound", true)
+            headingFound := !!scope
             ; Chrome does not always expose the modal heading. A visible Edit
             ; control whose nearest row contains both Name and StockCode is a
             ; stronger SKU-specific fallback than searching generic page text.
-            if HasVisibleMatrixSkuRows(document)
-                return Map("document", document, "scope", document, "headingFound", false)
+            if !scope && HasVisibleMatrixSkuRows(document)
+                scope := document
+
+            if scope && HasVisibleMatrixSkuRows(scope) {
+                visibleButtons := GetUniqueVisibleEditLocations(scope)
+                signature := BuildLocationSignature(visibleButtons)
+                if visibleButtons.Length && signature = priorSignature {
+                    if stableSince && A_TickCount - stableSince >= matrixStableDurationMs
+                        return Map("document", document, "scope", scope, "headingFound", headingFound)
+                } else if visibleButtons.Length {
+                    priorSignature := signature
+                    stableSince := A_TickCount
+                } else {
+                    priorSignature := ""
+                    stableSince := 0
+                }
+            } else {
+                priorSignature := ""
+                stableSince := 0
+            }
+        } catch {
+            priorSignature := ""
+            stableSince := 0
         }
         if A_TickCount >= deadline
             return Map("document", 0, "scope", 0, "headingFound", false)
@@ -4603,16 +5229,19 @@ BuildLocationSignature(items) {
 }
 
 ClickMatrixEditButton(item) {
-    ; Scroll until the saved StockCode/name identity is visible, then use its
-    ; current UIA rectangle. Never reuse a Y coordinate captured in a different
-    ; scroll position.
+    ; For a small, fully visible matrix, ReacquireMatrixSkuControls has already
+    ; produced a stable live rectangle in this exact parent-menu instance. Use
+    ; it directly instead of building a second accessibility tree before the
+    ; click. Large scrolling matrices still need to reveal the saved row first.
     ToolTip()
     CoordMode "Mouse", "Screen"
-    currentItem := item.HasOwnProp("RowKey") ? FindCurrentMatrixSkuButton(item) : item
+    currentItem := item
+    if item.HasOwnProp("RowKey") && (!item.HasOwnProp("RequiresScroll") || item.RequiresScroll)
+        currentItem := FindCurrentMatrixSkuButton(item)
     MouseMove currentItem.CentreX, currentItem.CentreY, 0
     Sleep 150
     Click currentItem.CentreX, currentItem.CentreY
-    Sleep 300
+    Sleep 750
 }
 
 ExtractMatrixProductNameFromRow(rowText, productIndex) {
@@ -4683,18 +5312,28 @@ ShowMatrixLookupStatus(message) {
 }
 
 WaitForChildProductPage(productIndex, productCount) {
-    global matrixPageWaitTimeoutMs, matrixNavigationDelayMs
+    global matrixPageWaitTimeoutMs, matrixNavigationDelayMs, matrixStableDurationMs
     Sleep matrixNavigationDelayMs
     deadline := A_TickCount + matrixPageWaitTimeoutMs
+    readySince := 0
     Loop {
         ShowMatrixLookupStatus("Waiting for child product " productIndex " of " productCount " to open...`nChecking the accessibility tree.")
         try {
             document := UIA_Browser().GetCurrentDocumentElement()
-            if !FindMatrixModalScope(document) {
-                ToolTip()
-                Sleep 400
-                return true
+            parentStillPresent := IsMatrixModalPresent(document) || !!FindMatrixModalScope(document)
+            if !parentStillPresent {
+                if !readySince
+                    readySince := A_TickCount
+                if A_TickCount - readySince >= matrixStableDurationMs {
+                    ToolTip()
+                    Sleep 1000
+                    return true
+                }
+            } else {
+                readySince := 0
             }
+        } catch {
+            readySince := 0
         }
         if A_TickCount >= deadline {
             ToolTip()
@@ -4705,163 +5344,146 @@ WaitForChildProductPage(productIndex, productCount) {
 }
 
 WaitForMatrixSkuPage(productIndex, expectedCount, allowParentReopen := true) {
-    global matrixReturnDelayMs, matrixFullyReopenParentAfterReturn
-    ; Cancel/Save has already been clicked. Do not interrogate the
-    ; accessibility tree during this transition; allow GO b2b three seconds
-    ; to restore the matrix SKU page, then continue.
-    ToolTip "Waiting for the matrix SKU page to load..."
+    global matrixReturnDelayMs, matrixFullyReopenParentAfterReturn, matrixPageWaitTimeoutMs
+    ; Cancel/Save has already been clicked. The returned SKU accessibility tree
+    ; is known to be stale after one child visit, so never validate or reuse it.
+    ; Wait for the parent menu physically, close the whole parent, and enter it
+    ; again before any new SKU-tree collection occurs.
+    ToolTip "Waiting for the matrix parent menu to return..."
     Sleep matrixReturnDelayMs
 
-    if allowParentReopen && matrixFullyReopenParentAfterReturn
-        FullyReopenActiveMatrixParent()
+    if allowParentReopen && matrixFullyReopenParentAfterReturn {
+        ToolTip "Discarding the used SKU menu and fully reopening the matrix parent..."
+        FullyReopenActiveMatrixParent(true)
+        ToolTip()
+        return true
+    }
+
+    ; Retained only for callers which explicitly opt out of the full reopen.
+    result := WaitForMatrixModalScope(matrixPageWaitTimeoutMs)
+    if !result["scope"]
+        throw Error("The matrix SKU page did not become stable after returning from child product " productIndex " of " expectedCount ".")
     ToolTip()
     return true
 }
 
-FullyReopenActiveMatrixParent() {
-    global activeMatrixParentProductName, matrixParentReopenDelayMs
+FullyReopenActiveMatrixParent(bypassParentSaveAccessibility := false) {
+    global activeMatrixParentProductName, matrixParentReopenDelayMs, coords
+    global matrixSkuTabSettleDelayMs
+    global matrixCatalogueSearchTimeoutMs
     if Trim(activeMatrixParentProductName) = ""
         throw Error("The active matrix parent name is unavailable, so the parent cannot be reopened safely.")
 
     ; Close/save the entire matrix parent to return to the catalogue list.
     ToolTip "Closing the matrix parent to rebuild GO b2b..."
-    ClickPoint("product_save_button", matrixParentReopenDelayMs)
+    LogText("matrix-navigation", "Closing matrix parent before catalogue reopen: " activeMatrixParentProductName)
+    Sleep 250
+    if bypassParentSaveAccessibility {
+        ; This path is used immediately after leaving a child. Do not read the
+        ; known-stale SKU accessibility tree merely to locate the parent Save
+        ; button; perform the configured physical Save click and discard that
+        ; entire parent-menu instance.
+        ToolTip()
+        ClickPoint("product_save_button", matrixParentReopenDelayMs)
+        savePoint := {
+            CentreX: coords["product_save_button"][1],
+            CentreY: coords["product_save_button"][2],
+            ScopeLabel: "configured physical coordinate; stale SKU tree bypassed"
+        }
+    } else {
+        savePoint := PhysicallyClickMatrixParentSave(matrixParentReopenDelayMs)
+    }
+    LogText(
+        "matrix-navigation",
+        "Physically clicked the matrix parent Save control."
+        . "`nAccessibility scope: " savePoint.ScopeLabel
+        . "`nPhysical click centre: " savePoint.CentreX "," savePoint.CentreY
+    )
 
-    ; Locate the exact matrix parent row on the catalogue page and click its
-    ; live Edit-button centre. This avoids a fixed row coordinate.
-    ToolTip "Finding matrix parent:`n" activeMatrixParentProductName
-    editButton := WaitForCatalogueProductEditButton(activeMatrixParentProductName, 10000)
-    if !editButton
-        throw Error("Could not find the catalogue Edit button for matrix parent '" activeMatrixParentProductName "'.")
-    MouseMove editButton.CentreX, editButton.CentreY, 0
-    Sleep 150
-    Click editButton.CentreX, editButton.CentreY
+    ; Locate the exact Matrix Product row in the freshly collected live tree,
+    ; then retain only its child Edit link's screen rectangle. The button press
+    ; itself is a real mouse click at that rectangle's centre.
+    ToolTip "Locating the exact matrix parent Edit button in the accessibility tree...`n" activeMatrixParentProductName
+    firstLocateProblem := ""
+    try editPoint := WaitForCatalogueMatrixParentEditPoint(activeMatrixParentProductName, matrixCatalogueSearchTimeoutMs)
+    catch as err {
+        firstLocateProblem := err.Message
+        ; Retry only if UIA still exposes a live Save control, proving the
+        ; product editor remains open. Never click the old Save coordinate on
+        ; an already-open catalogue page.
+        LogText(
+            "matrix-navigation-retry",
+            "The catalogue was unavailable after the initial physical Save. Checking whether the editor still exposes Save."
+            . "`nParent: " activeMatrixParentProductName
+            . "`nFirst lookup problem: " firstLocateProblem
+        )
+        retrySavePoint := PhysicallyClickMatrixParentSave(matrixParentReopenDelayMs, true)
+        if !retrySavePoint
+            throw Error(
+                "The catalogue accessibility rows were unavailable after physically closing the matrix parent, and the product editor no longer exposed a Save control."
+                . "`nParent: '" activeMatrixParentProductName "'"
+                . "`nLookup problem: " firstLocateProblem
+                . "`nNo second coordinate click was attempted."
+            )
+        LogText(
+            "matrix-navigation-retry",
+            "The editor still exposed Save, so it was physically clicked once more."
+            . "`nAccessibility scope: " retrySavePoint.ScopeLabel
+            . "`nPhysical click centre: " retrySavePoint.CentreX "," retrySavePoint.CentreY
+        )
+        try editPoint := WaitForCatalogueMatrixParentEditPoint(activeMatrixParentProductName, matrixCatalogueSearchTimeoutMs)
+        catch as retryErr {
+            throw Error(
+                "The exact matrix parent could not be located after two physical Save attempts."
+                . "`nParent: '" activeMatrixParentProductName "'"
+                . "`nFirst lookup: " firstLocateProblem
+                . "`nSecond lookup: " retryErr.Message
+            )
+        }
+    }
+    LogText(
+        "matrix-navigation",
+        "Accessibility located the exact Matrix Product Edit link for physical clicking."
+        . "`nParent: " activeMatrixParentProductName
+        . "`nRow: " editPoint.RowText
+        . "`nAccessibility scope: " editPoint.ScopeLabel
+        . "`nRectangle: " editPoint.X "," editPoint.Y " " editPoint.W "x" editPoint.H
+        . "`nPhysical click centre: " editPoint.CentreX "," editPoint.CentreY
+    )
+    ; Clear the status tooltip before moving to the live button rectangle so
+    ; the tooltip itself can never cover and intercept the physical click.
+    ToolTip()
+    MouseMove editPoint.CentreX, editPoint.CentreY, 0
+    Sleep 250
+    Click editPoint.CentreX, editPoint.CentreY
     Sleep matrixParentReopenDelayMs
 
-    ToolTip "Opening the refreshed SKUs tab..."
-    ClickPoint("matrix_skus_tab", 1500)
-}
-
-WaitForCatalogueProductEditButton(productName, timeoutMs) {
-    deadline := A_TickCount + timeoutMs
-    Loop {
-        try {
-            document := UIA_Browser().GetCurrentDocumentElement()
-            button := FindCatalogueProductEditButton(document, productName)
-            if button
-                return button
-        }
-        if A_TickCount >= deadline
-            return 0
-        Sleep 300
+    detectedParentName := ""
+    try {
+        ClickPoint("overview_tab", 1000)
+        detectedParentName := CleanText(CopyOptionalFromPoint("product_name"))
     }
-}
-
-FindCatalogueProductEditButton(document, productName) {
-    targetName := NormaliseCatalogueProductName(productName)
-
-    ; Prefer matching the accessible row belonging to each live Edit button.
-    ; Some GO b2b catalogue views do not expose the product-name text as a
-    ; separate searchable UIA element after a rename, although the Edit
-    ; button's ancestor row still contains the complete current name.
-    directMatch := FindCatalogueMatrixParentEditByRow(document, targetName)
-    if directMatch
-        return directMatch
-
-    words := StrSplit(targetName, " "), searchAnchor := ""
-    Loop Min(3, words.Length)
-        searchAnchor .= (A_Index > 1 ? " " : "") words[A_Index]
-    ; Search with a short stable anchor, then enforce the complete normalised
-    ; parent name below. This tolerates NBSPs and repeated spaces in Chrome.
-    try productElements := document.FindElements({ Name: searchAnchor, mm: 2, cs: 0 })
-    catch
-        return 0
-
-    productRows := []
-    for _, productElement in productElements {
-        try {
-            if productElement.IsOffscreen
-                continue
-            exposedName := NormaliseCatalogueProductName(productElement.Name)
-            if !InStr(exposedName, targetName)
-                continue
-            rect := productElement.Location
-            if rect.w > 0 && rect.h > 0
-                productRows.Push({ CentreY: rect.y + rect.h / 2, Name: productElement.Name })
-        }
+    if NormaliseCatalogueProductName(detectedParentName) != NormaliseCatalogueProductName(activeMatrixParentProductName) {
+        detectedText := detectedParentName != "" && StrLen(detectedParentName) <= 200
+            ? "'" detectedParentName "'"
+            : "[Product Name could not be read]"
+        throw Error(
+            "Safety stop: the accessibility-derived physical Edit click did not open the expected matrix parent."
+            . "`nExpected: '" activeMatrixParentProductName "'"
+            . "`nDetected: " detectedText
+            . "`nClicked accessibility rectangle: " editPoint.X "," editPoint.Y " " editPoint.W "x" editPoint.H
+        )
     }
+    LogText("matrix-navigation", "Accessibility-derived physical Edit click opened and verified matrix parent: " activeMatrixParentProductName)
 
-    if productRows.Length = 0
-        return 0
-
-    try editElements := document.FindElements({ Name: "Edit", mm: 2, cs: 0 })
-    catch
-        return 0
-
-    best := 0, bestDistance := 999999
-    for _, editElement in editElements {
-        try {
-            if editElement.IsOffscreen || StrLower(Trim(editElement.Name)) != "edit"
-                continue
-            rect := editElement.Location
-            if rect.w <= 0 || rect.h <= 0
-                continue
-            editCentreY := rect.y + rect.h / 2
-            for _, productRow in productRows {
-                distance := Abs(editCentreY - productRow.CentreY)
-                if distance < bestDistance {
-                    bestDistance := distance
-                    best := { CentreX: Round(rect.x + rect.w / 2), CentreY: Round(editCentreY) }
-                }
-            }
-        }
-    }
-
-    ; Adjacent catalogue rows are roughly 53 pixels apart. This tolerance
-    ; accepts the target row while rejecting the Edit buttons above and below.
-    return best && bestDistance <= 35 ? best : 0
-}
-
-FindCatalogueMatrixParentEditByRow(document, targetName) {
-    try editElements := document.FindElements({ Name: "Edit", mm: 2, cs: 0 })
-    catch
-        return 0
-
-    for _, editElement in editElements {
-        try {
-            if editElement.IsOffscreen || StrLower(Trim(editElement.Name)) != "edit"
-                continue
-            rect := editElement.Location
-            if rect.w <= 0 || rect.h <= 0
-                continue
-            if !CatalogueEditBelongsToMatrixParent(editElement, targetName)
-                continue
-            return { CentreX: Round(rect.x + rect.w / 2), CentreY: Round(rect.y + rect.h / 2) }
-        }
-    }
-    return 0
-}
-
-CatalogueEditBelongsToMatrixParent(editElement, targetName) {
-    node := editElement
-    Loop 10 {
-        try node := UIA.TreeWalkerTrue.GetParentElement(node)
-        catch
-            return false
-        if !node
-            return false
-        try rowText := NormaliseCatalogueProductName(node.Name)
-        catch
-            continue
-        if !InStr(rowText, targetName)
-            continue
-        ; The catalogue can show child Matrix SKU rows directly beneath their
-        ; parent. Only an ancestor explicitly identifying a Matrix Product is
-        ; allowed to satisfy the reopen lookup.
-        if InStr(rowText, "matrix product") && !InStr(rowText, "matrix sku")
-            return true
-    }
-    return false
+    ; Enter the refreshed SKU menu physically, but deliberately do not collect
+    ; its accessibility tree here. The immediate caller owns the one fresh
+    ; scan for this menu and will use that scan's coordinates for its child.
+    ToolTip "Opening a fresh Matrix SKUs menu..."
+    ClickPoint("matrix_skus_tab", matrixSkuTabSettleDelayMs)
+    LogText("matrix-navigation", "Fresh Matrix SKUs menu opened without pre-reading its accessibility tree: " activeMatrixParentProductName)
+    ToolTip()
+    return true
 }
 
 NormaliseCatalogueProductName(value) {
@@ -4869,6 +5491,10 @@ NormaliseCatalogueProductName(value) {
     value := StrReplace(value, "–", "-")
     value := StrReplace(value, "—", "-")
     value := RegExReplace(Trim(value), "\s+", " ")
+    ; GO b2b inconsistently exposes spaces around hyphens between the Product
+    ; Name field and its catalogue tile (for example "Fuchsia - Dry" versus
+    ; "Fuchsia- Dry"). Treat that presentation-only spacing as equivalent.
+    value := RegExReplace(value, "\s*-\s*", "-")
     return StrLower(value)
 }
 

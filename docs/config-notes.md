@@ -21,6 +21,8 @@ HTML snippet field: x: 876, y: 553
 In images page (within product page):
 Image: x: 399, y: 454
 Image details page button: x: 319, y: 555
+Previous five images button: x: 309, y: 480
+Next five images button: x: 1583, y: 476
 
 In image details page (after pressing image details page button):
 Image title field: x: 921, y: 620

@@ -5,7 +5,7 @@ Use:
 - `cromartie_colour_glaze_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_colour_glaze_product_page_seo_strategy_workbook_aligned.md`
 - `cromartie_flexible_cms_styling_guidance_updated.md`
-- `cromartie_colour_glaze_product_page_recurring_fixes_v15.md`
+- `cromartie_colour_glaze_product_page_recurring_fixes_v16.md`
 
 Important styling instruction:
 You must use `cromartie_flexible_cms_styling_guidance_updated.md` as the HTML styling source of truth.
@@ -14,7 +14,7 @@ The CMS-ready HTML snippet should follow the flexible Cromartie CMS structure an
 
 The response should stay similar to the usual format I already get, but the HTML snippet now needs to include a styled product specification table inside the snippet.
 
-Page URL:
+Configured Cromartie page URL (context only; do not browse it):
 {{PAGE_URL}}
 
 Current page/product name:
@@ -32,21 +32,41 @@ Current HTML/product description snippet:
 {{CURRENT_HTML_SNIPPET}}
 ```
 
-Required internal links:
-Milton Bridge Stoneware Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Stoneware-Glazes) and Fired Colour (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes)
+Recommended internal links — manual input:
+
+Use the following manually supplied internal links in the HTML snippet where genuinely useful:
+
+===RECOMMENDED_INLINKS_START===
+{{REQUIRED_INTERNAL_LINKS}}
+===RECOMMENDED_INLINKS_END===
+
+This area may contain one internal link, two internal links, `NONE` or `N/A`.
+
+Important:
+
+- These links are navigation recommendations, not factual product sources
+- Never use an inlink destination to infer extra product facts
+- Do not browse for replacement links
+- If `NONE` or `N/A`, do not invent links
+- Use a maximum of two supplied links
+- Every `<a>` must have a descriptive `title` attribute
+- Prefer the purple CTA/inlink button styling from the flexible CMS guidance when links sit after the specification table
+- Do not create an extra paragraph solely to hold an internal link
+- Where two useful links are supplied, two CTA buttons are acceptable
+- Do not force an inline paragraph link when a post-table CTA is cleaner
 
 Image notes:
 {{IMAGE_NOTES}}
 
-Additional product notes:
-Recommended firing temperature: 1240–1280°C / Cone 7–9
-Liquid option: 250ml ready-mixed brush-on glaze
-Dry option: 1kg and 25kg powdered glaze
-Dry mixing guidance: 1 part powder, 0.75 part water and 0.5 part medium
-Application: stir well and brush on up to 3 coats, allowing suitable drying between coats
-Use: suitable for functional tableware and decorative ceramic finishes when fired as directed
+Additional notes — manual input:
 
-Fired results can vary depending on clay body, application thickness, layering and kiln conditions. Use test tiles to compare results before applying a new glaze or combination across a full batch of work.
+Use the following manually supplied notes where relevant. They may contain product facts, editorial context or instructions. Do not extend them with unsupported assumptions or let them override the current product information supplied above.
+
+===ADDITIONAL_NOTES_START===
+{{ADDITIONAL_PRODUCT_NOTES}}
+===ADDITIONAL_NOTES_END===
+
+If this area contains `NONE` or `N/A`, there are no additional notes.
 
 Task:
 Create:
@@ -74,7 +94,7 @@ Important:
 - Use UK English
 - Use “colour”, not “color”, unless it is part of an official product or brand name
 - Make image SEO accurately describe what is visible
-- Include required internal links where they fit naturally
+- Include supplied recommended internal links where they fit naturally
 - Every link in the HTML must include a descriptive `title` attribute
 - Do not over-link
 - Do not provide a full page rewrite outside the CMS snippet

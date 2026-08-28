@@ -1,4 +1,4 @@
-import path from 'node:path';
+import path from "node:path";
 
 export const EXIT_CODES = Object.freeze({
   success: 0,
@@ -9,9 +9,9 @@ export const EXIT_CODES = Object.freeze({
 });
 
 export const DEFAULT_CONFIG = Object.freeze({
-  overviewUrl: 'https://www.botz-glasuren.de/en/productoverview',
-  category: 'Earthenware',
-  outputDirectory: 'C:\\BOTZ',
+  overviewUrl: "https://www.botz-glasuren.de/en/productoverview",
+  category: "Earthenware",
+  outputDirectory: "C:\\BOTZ\\stoneware",
   expectedReferenceCount: 136,
   navigationTimeoutMs: 30_000,
   downloadTimeoutMs: 30_000,
@@ -23,7 +23,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   blockingResponseLimit: 3,
   headless: true,
   userAgent:
-    'Cromartie-BOTZ-Public-Product-Scraper/1.0 (respectful sequential scraper; https://www.cromartiehobbycraft.co.uk/)',
+    "Cromartie-BOTZ-Public-Product-Scraper/1.0 (respectful sequential scraper; https://www.cromartiehobbycraft.co.uk/)",
 });
 
 export function buildConfig(options = {}) {

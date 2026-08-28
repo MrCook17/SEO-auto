@@ -1,15 +1,16 @@
 ﻿CROMARTIE_BOTZ_STATE_V3
-product_name	MORNING DEW 800ML
-stock_code	B95408
-match_code	9540
-folder	C:\BOTZ\9540 Morning dew
-product_md	C:\BOTZ\9540 Morning dew\product.md
-product_md_size	829
-product_md_modified	20260806131857
+product_name	ENGOBE RED 800ML
+stock_code	B90618
+match_code	9061
+folder	C:\BOTZ\engobes\9061 Engobe red
+product_md	C:\BOTZ\engobes\9061 Engobe red\product.md
+product_md_size	1317
+product_md_modified	20260813143547
 initial_gallery_count	0
-uploaded_count	3
+uploaded_count	4
 pending_image	0
-image_count	3
-image	1	C:\BOTZ\9540 Morning dew\images\9540_morning-dew_01.jpg	81106	20260806131856
-image	2	C:\BOTZ\9540 Morning dew\images\9540_morning-dew_02.jpg	159984	20260806131857
-image	3	C:\BOTZ\9540 Morning dew\images\9540_morning-dew_03.jpg	139827	20260806131857
+image_count	4
+image	1	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_01.jpg	72843	20260813145851
+image	2	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_02.jpg	190778	20260813143546
+image	3	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_03.jpg	203184	20260813143547
+image	4	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_04.jpg	63987	20260813145853

@@ -1,13 +1,11 @@
-Optimise image SEO only for every child product belonging to this Cromartie matrix page:
-
-https://www.cromartiehobbycraft.co.uk/Catalogue/Throwing-Clay-Modelling-Clay-and-Pottery-Casting-Slip/Clay-Tools/GR-Pottery-Forms-Clay-Tools-and-Formers
+Optimise image SEO only for every child product belonging to the configured Cromartie matrix page.
 
 This task is specifically for the GR Pottery Forms Clay Tools and Formers page and its child products. Keep the wording focused on the exact pottery form, clay tool or former represented by each child product and attached image.
 
 Of the project source files, use only the latest recurring fixes file, and only where its guidance is relevant to image SEO, naming consistency, UK English, factual accuracy or avoiding recurring mistakes. Do not use the product-page SEO guidance workbook, product-page SEO strategy, keyword map, CMS styling guidance or other project source files for this temporary task.
 
 Configured target page URL:
-https://www.cromartiehobbycraft.co.uk/Catalogue/Throwing-Clay-Modelling-Clay-and-Pottery-Casting-Slip/Clay-Tools/GR-Pottery-Forms-Clay-Tools-and-Formers
+{{PAGE_URL}}
 
 Matrix product name: {{MATRIX_PRODUCT_NAME}}
 Parent meta title (context only): {{CURRENT_META_TITLE}}

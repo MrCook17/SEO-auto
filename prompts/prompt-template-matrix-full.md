@@ -34,17 +34,19 @@ Image notes:
 
 Additional product notes:
 
-Glaze type: liquid cone 6 stoneware glaze
-Firing: cone 6, around 1230°C
-Application: suitable for dipping and layering
-Clay bodies: suitable for porcelain and stoneware pieces
-Finish: atmospheric mid-fire glaze effects with colour depth and surface variation
+===ADDITIONAL_NOTES_START===
+{{ADDITIONAL_PRODUCT_NOTES}}
+===ADDITIONAL_NOTES_END===
 
-Fired results can vary depending on clay body, application thickness, layering and kiln conditions. Use test tiles to compare results before applying a new glaze or combination across a full batch of work.
+If this area contains `NONE` or `N/A`, there are no additional notes.
 
 Manually recommended internal links:
 
-C6 Pro Series Stoneware Glazes (Liquid) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes) and C6 Pro Series Glazes (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes) or Powder Gum Arabic (for thickening glaze) (https://www.cromartiehobbycraft.co.uk/Catalogue/Ceramic-Glazes-Ceramic-Underglazes-for-Pottery-Painting/Fired-Colour-Pottery-Glazes-Underglazes/Pro-Series-Glazes/Cone-6-Pro-Series-Stoneware-Glazes/Powder-Gum-Arabic-PD-GUMA) and any other inlinks that may exist which are relevant
+===RECOMMENDED_INLINKS_START===
+{{REQUIRED_INTERNAL_LINKS}}
+===RECOMMENDED_INLINKS_END===
+
+If this area contains `NONE` or `N/A`, do not invent internal links.
 
 Accuracy and SEO requirements:
 

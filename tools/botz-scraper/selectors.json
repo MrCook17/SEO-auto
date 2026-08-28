@@ -1,7 +1,7 @@
 {
   "overview": {
-    "earthenwareFilter": "#productgroup input[name=\"productgroup\"][value=\"1\"]",
-    "earthenwareLabelCount": "#countProductgroup_1",
+    "earthenwareFilter": "#productgroup input[name=\"productgroup\"][value=\"5\"]",
+    "earthenwareLabelCount": "#countProductgroup_5",
     "resultCount": "#filterresultsCount",
     "resultsContainer": "#filterresults",
     "productLinks": "#filterresults a[href*=\"productoverview\"][href*=\"productno\"]"
