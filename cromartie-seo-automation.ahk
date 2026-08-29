@@ -3,6 +3,7 @@
 
 #Include "UIA-v2\Lib\UIA.ahk"
 #Include "UIA-v2\Lib\UIA_Browser.ahk"
+#Include "lib\figuredart-product-creation.ahk"
 
 SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
@@ -20,7 +21,7 @@ CoordMode "Mouse", "Screen"
 ; - Uses a temporary hardcoded public URL instead of the GO B2B CMS URL.
 ; - Pastes the prompt into ChatGPT.
 ; - Tries to copy one or more high-quality product images from the CMS Images tab and paste them into ChatGPT.
-; - Stops before sending in ordinary and matrix modes unless full workflow automation is enabled; BOTZ submits after its attachment timer.
+; - Stops before sending in ordinary and matrix modes unless full workflow automation is enabled; supplier-creation modes submit after their attachment timer.
 ; - Uses ChatGPT's latest response Copy button and extracts its automation block.
 ; - Pastes generated SEO fields into GO B2B.
 ; - Clicks the main product Save button after all fields are pasted in full, metadata and image-only modes.
@@ -47,6 +48,7 @@ chatgptWinTitle := "Colour & Glaze"
 ; "matrix_image" = image SEO for every child of one matrix product
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
 ; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
+; "figuredart" = Figured'Art Product Creation from the matching C:\FiguredArt product folder
 ; This is the fallback used by older settings files. Saving the
 ; Ctrl+Shift+NumLock menu persists the selected mode across reloads.
 SeoAutomationMode := "full"
@@ -59,6 +61,7 @@ MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
 MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
 ; BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
 BotzPromptTemplatePath := promptDir "\prompt-template-botz-engobes.md"
+FiguredArtPromptTemplatePath := promptDir "\prompt-template-figuredart.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
@@ -69,8 +72,10 @@ debugDir := A_ScriptDir "\debug"
 matrixStateFilePath := stateDir "\matrix-image-state.txt"
 matrixFullStateFilePath := stateDir "\matrix-full-state.txt"
 botzStateFilePath := stateDir "\botz-product-state.txt"
+figuredArtStateFilePath := stateDir "\figuredart-product-state.txt"
 botzPromptSettingsFilePath := stateDir "\botz-prompt-settings.txt"
 botzRootDir := "C:\BOTZ\engobes"
+figuredArtRootDir := "C:\FiguredArt"
 botzFilePickerTimeoutMs := 10000
 botzChatPickerFolderLoadMs := 2500
 botzChatPickerSelectAllMs := 1500
@@ -93,6 +98,7 @@ matrixNoNewRowsStopCount := 3
 global matrixState := 0
 global matrixFullState := 0
 global botzState := 0
+global figuredArtState := 0
 global botzPromptSettings := 0
 global botzPromptSettingsGui := 0
 global activeMatrixParentProductName := ""
@@ -119,6 +125,10 @@ attemptImageCopyAfterPrompt := true
 ; Fallback value used only until the Images tab is scanned with UIA-v2.
 ; Every workflow now replaces this automatically from the Image Gallery cards.
 imageCountToProcess := 1
+; GO b2b permits at most 11 image records per product. Every workflow caps its
+; automation output, parser and CMS image work to the first 11 images. Supplier
+; modes may attach later images to ChatGPT as reference context only.
+maximumImagesPerProduct := 11
 
 ; Image/card coordinates for the five slots visible on each Images-tab page.
 ; Global image indices are mapped to these reusable slots and the gallery's
@@ -362,15 +372,19 @@ RequestDepartmentStopAfterCurrent() {
 }
 
 SetImageCountToProcess(imageCount) {
-    global imageCountToProcess
+    global imageCountToProcess, maximumImagesPerProduct
 
     if imageCount < 0 {
         Flash("Image count cannot be negative.")
         return false
     }
 
-    imageCountToProcess := imageCount
-    Flash("Prompt/CMS image count set to " imageCount ".")
+    requestedCount := imageCount
+    imageCountToProcess := Min(imageCount, maximumImagesPerProduct)
+    message := "Prompt/CMS image count set to " imageCountToProcess "."
+    if requestedCount > maximumImagesPerProduct
+        message .= "`nOnly the first " maximumImagesPerProduct " images can be processed per product."
+    Flash(message)
     return true
 }
 
@@ -405,13 +419,13 @@ OpenProductBuildPromptAndPasteToChatGPT() {
             throw Error("NumpadEnter is not used for matrix-image mode. Open the matrix parent and press Numpad4.")
 
         ClickPoint("product_edit_button", 1500)
-        if IsBotzMode()
-            BuildBotzPrompt(pageUrl)
+        if IsSupplierProductCreationMode()
+            BuildSupplierProductCreationPrompt(pageUrl)
         else if IsMatrixFullMode()
             BuildMatrixFullPrompt(pageUrl)
         else
             BuildPromptFromCurrentProductPage(pageUrl)
-        RunAutomaticWorkflowIfEnabled(IsBotzMode())
+        RunAutomaticWorkflowIfEnabled(IsSupplierProductCreationMode())
     } catch as err {
         MsgBox "OpenProductBuildPromptAndPasteToChatGPT failed:`n`n" err.Message
     }
@@ -439,15 +453,15 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
     ; Use the temporary hardcoded public URL for {{PAGE_URL}}. Do not copy the
     ; browser URL because the active page is a GO b2b CMS URL.
     pageUrl := hardcodedPageUrl
-    if IsBotzMode()
-        BuildBotzPrompt(pageUrl)
+    if IsSupplierProductCreationMode()
+        BuildSupplierProductCreationPrompt(pageUrl)
     else if IsMatrixFullMode()
         BuildMatrixFullPrompt(pageUrl)
     else if IsMatrixImageMode()
         BuildMatrixImagePrompt(pageUrl)
     else
         BuildPromptFromCurrentProductPage(pageUrl)
-    return RunAutomaticWorkflowIfEnabled(IsBotzMode(), forceAutomaticCompletion)
+    return RunAutomaticWorkflowIfEnabled(IsSupplierProductCreationMode(), forceAutomaticCompletion)
 }
 
 ; ==========================================================
@@ -536,12 +550,12 @@ ValidateSeoAutomationMode() {
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full' or 'botz'.")
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz' or 'figuredart'.")
     }
 }
 
 GetSeoAutomationModeOptions() {
-    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz"]
+    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart"]
 }
 
 IsValidSeoAutomationMode(mode) {
@@ -591,6 +605,22 @@ IsBotzMode() {
     return GetSeoAutomationMode() = "botz"
 }
 
+IsFiguredArtMode() {
+    return GetSeoAutomationMode() = "figuredart"
+}
+
+IsSupplierProductCreationMode() {
+    return IsBotzMode() || IsFiguredArtMode()
+}
+
+BuildSupplierProductCreationPrompt(pageUrl) {
+    if IsBotzMode()
+        return BuildBotzPrompt(pageUrl)
+    if IsFiguredArtMode()
+        return BuildFiguredArtPrompt(pageUrl)
+    throw Error("The current SEO mode is not a supplier product-creation mode.")
+}
+
 IsAnyMatrixMode() {
     return IsMatrixImageMode() || IsMatrixFullMode()
 }
@@ -605,7 +635,7 @@ GetDepartmentProductTypeForSeoMode(mode := "") {
 }
 
 GetPromptTemplatePath() {
-    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath, BotzPromptTemplatePath
+    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath, BotzPromptTemplatePath, FiguredArtPromptTemplatePath
 
     ValidateSeoAutomationMode()
 
@@ -621,6 +651,8 @@ GetPromptTemplatePath() {
         return MatrixFullPromptTemplatePath
     if IsBotzMode()
         return BotzPromptTemplatePath
+    if IsFiguredArtMode()
+        return FiguredArtPromptTemplatePath
 
     return FullPromptTemplatePath
 }
@@ -681,6 +713,9 @@ EnsurePromptSupportsImageCount(prompt, imageCount) {
 }
 
 BuildAutomationImageOutputBlock(imageCount, includeImageNames := false) {
+    global maximumImagesPerProduct
+    if imageCount < 0 || imageCount > maximumImagesPerProduct
+        throw Error("Automation image output count must be between 0 and " maximumImagesPerProduct ".")
     block := ""
 
     Loop imageCount {
@@ -1180,10 +1215,12 @@ ClickCoordinates(point, delayMs := 250) {
 }
 
 ValidateImageTargetConfig() {
-    global imageCountToProcess, imageTargets, imageGalleryPageSize, coords
+    global imageCountToProcess, maximumImagesPerProduct, imageTargets, imageGalleryPageSize, coords
 
     if imageCountToProcess < 0
         throw Error("imageCountToProcess cannot be negative.")
+    if imageCountToProcess > maximumImagesPerProduct
+        throw Error("imageCountToProcess cannot exceed the GO b2b limit of " maximumImagesPerProduct ".")
 
     if imageGalleryPageSize < 1 || imageTargets.Length != imageGalleryPageSize
         throw Error("Image pagination requires exactly " imageGalleryPageSize " coordinate entries in imageTargets; found " imageTargets.Length ".")
@@ -1197,17 +1234,21 @@ ValidateImageTargetConfig() {
 ; would count the same cards repeatedly. Each genuine card has one exact-name
 ; Remove button, which also remains correct when visible image labels skip.
 DetectAndSetImageCountFromImagesTab(expectedCount := -1) {
-    global imageCountToProcess
+    global imageCountToProcess, maximumImagesPerProduct
 
     ValidateImageTargetConfig()
     OpenFirstImageGalleryPage()
-    detectedCount := WaitForStableImageGalleryCount()
+    actualCount := WaitForStableImageGalleryCount()
+    detectedCount := Min(actualCount, maximumImagesPerProduct)
 
     if expectedCount >= 0 && detectedCount != expectedCount
         throw Error("Image count changed or differs between matrix children: expected " expectedCount ", detected " detectedCount ".")
 
     imageCountToProcess := detectedCount
-    LogText("image-count-detected", "UIA-v2 detected " detectedCount " total Image Gallery card(s) in one stable scan, including cards on later visual pages.")
+    message := "UIA-v2 detected " actualCount " total Image Gallery card(s) in one stable scan, including cards on later visual pages."
+    if actualCount > maximumImagesPerProduct
+        message .= " Only the first " maximumImagesPerProduct " will be processed because GO b2b permits at most " maximumImagesPerProduct " image records per product."
+    LogText("image-count-detected", message)
     return detectedCount
 }
 
@@ -1327,6 +1368,11 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
 
         if IsBotzMode() {
             PasteBotzOutputToCms()
+            return true
+        }
+
+        if IsFiguredArtMode() {
+            PasteFiguredArtOutputToCms()
             return true
         }
 
@@ -2362,7 +2408,7 @@ InsertMetaFields(metaTitle, metaDescription, htmlSnippet := "") {
     ClickPoint("description_tab", 600)
     PasteToPoint("meta_title", metaTitle)
 
-    if IsFullMode() || IsBotzMode()
+    if IsFullMode() || IsSupplierProductCreationMode()
         PasteToPoint("html_snippet", htmlSnippet)
 
     PasteToPoint("meta_description", metaDescription)
@@ -3070,7 +3116,7 @@ BuildBotzRecommendedInlinks(settings) {
 ; ==========================================================
 
 BuildBotzPrompt(pageUrl) {
-    global cmsWinTitle, BotzPromptTemplatePath, botzState, botzPromptSettings
+    global cmsWinTitle, BotzPromptTemplatePath, botzState, botzPromptSettings, maximumImagesPerProduct
 
     try {
         ClearActiveCmsProductCode()
@@ -3096,9 +3142,10 @@ BuildBotzPrompt(pageUrl) {
 
         ; This scan deliberately happens immediately before request creation.
         ; product.md image lists are never read or trusted by the automation.
-        imageFiles := EnumerateBotzImageFiles(imagesDir)
-        if imageFiles.Length = 0
+        attachmentImageFiles := EnumerateBotzImageFiles(imagesDir)
+        if attachmentImageFiles.Length = 0
             throw Error("The matched BOTZ images folder contains no supported image files: " imagesDir)
+        imageFiles := TakeFirstBotzImageFiles(attachmentImageFiles, maximumImagesPerProduct)
         imageManifest := BuildBotzImageManifest(imageFiles)
 
         if !FileExist(BotzPromptTemplatePath)
@@ -3111,7 +3158,8 @@ BuildBotzPrompt(pageUrl) {
             productName,
             productMd,
             imageFiles,
-            botzPromptSettings
+            botzPromptSettings,
+            attachmentImageFiles
         )
 
         botzState := Map(
@@ -3133,11 +3181,12 @@ BuildBotzPrompt(pageUrl) {
         SaveBotzState(botzState)
 
         LogText("botz-source", BuildBotzSourceLog(botzState))
+        LogSupplierChatGptImagePlan("BOTZ", "botz", attachmentImageFiles.Length, imageFiles.Length)
         LogText("botz-chatgpt-request", prompt)
         PastePromptToChatGPT(prompt)
         ValidateBotzSourcesUnchanged(botzState)
-        AttachBotzImagesToChatGpt(imageFiles)
-        Flash("BOTZ prompt and " imageFiles.Length " image attachment(s) were submitted to ChatGPT.", 3000)
+        AttachBotzImagesToChatGpt(attachmentImageFiles)
+        Flash("BOTZ prompt and " attachmentImageFiles.Length " image attachment(s) were submitted to ChatGPT.`nGO b2b remains limited to the first " imageFiles.Length " image(s).", 3000)
     } catch as err {
         if HasActiveCmsProductCode() {
             LogText("botz-error", "Prompt build stopped: " err.Message)
@@ -3185,14 +3234,34 @@ FindUniqueBotzProductFolder(matchCode) {
     return matches[1]
 }
 
-EnumerateBotzImageFiles(imagesDir) {
+EnumerateBotzImageFiles(imagesDir, maximumCount := 0) {
     files := []
     Loop Files imagesDir "\*", "F" {
         if RegExMatch(A_LoopFileName, "i)\.(jpe?g|png|webp)$")
             files.Push(A_LoopFileFullPath)
     }
     NaturalSortBotzPaths(files)
+    while maximumCount > 0 && files.Length > maximumCount
+        files.Pop()
     return files
+}
+
+TakeFirstBotzImageFiles(imageFiles, maximumCount) {
+    if maximumCount < 0
+        throw Error("The supplier image limit cannot be negative.")
+    limitedFiles := []
+    count := maximumCount = 0 ? imageFiles.Length : Min(imageFiles.Length, maximumCount)
+    Loop count
+        limitedFiles.Push(imageFiles[A_Index])
+    return limitedFiles
+}
+
+LogSupplierChatGptImagePlan(supplierName, logPrefix, attachmentCount, cmsImageCount) {
+    message := "Attaching all " attachmentCount " supplier image(s) to ChatGPT using Ctrl+A."
+    message .= " The automation output, parser and GO b2b image work use only the first " cmsImageCount " image(s)."
+    if attachmentCount > cmsImageCount
+        message .= " The remaining " (attachmentCount - cmsImageCount) " attachment(s) are reference context only."
+    LogText(logPrefix "-image-plan", message)
 }
 
 BuildBotzImageManifest(imageFiles) {
@@ -3230,15 +3299,18 @@ CompareBotzPathsNaturally(pathA, pathB) {
     return result != 0 ? result : StrCompare(pathA, pathB, false)
 }
 
-BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0) {
+BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0, attachmentImageFiles := 0) {
     if !IsObject(promptSettings)
         promptSettings := CreateDefaultBotzPromptSettings()
+    if !IsObject(attachmentImageFiles)
+        attachmentImageFiles := imageFiles
 
     requiredMarkers := [
         "{{PAGE_URL}}",
         "{{PRODUCT_NAME}}",
         "{{PRODUCT_MD_CONTENT}}",
         "{{IMAGE_COUNT}}",
+        "{{ATTACHMENT_IMAGE_COUNT}}",
         "{{IMAGE_ORDER}}",
         "{{RECOMMENDED_INLINKS}}",
         "{{ADDITIONAL_NOTES}}",
@@ -3250,9 +3322,12 @@ BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles,
     }
 
     imageOrder := ""
-    Loop imageFiles.Length {
-        SplitPath imageFiles[A_Index], &fileName
-        imageOrder .= "Image " A_Index " of " imageFiles.Length ": " fileName "`n"
+    Loop attachmentImageFiles.Length {
+        SplitPath attachmentImageFiles[A_Index], &fileName
+        imageRole := A_Index <= imageFiles.Length
+            ? "GO b2b image " A_Index
+            : "reference only - do not return CMS image fields"
+        imageOrder .= "Attachment " A_Index " of " attachmentImageFiles.Length ": " fileName " (" imageRole ")`n"
     }
 
     outputFields := BuildAutomationImageOutputBlock(imageFiles.Length, true)
@@ -3261,6 +3336,7 @@ BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles,
         "{{PRODUCT_NAME}}", productName,
         "{{PRODUCT_MD_CONTENT}}", productMd,
         "{{IMAGE_COUNT}}", imageFiles.Length,
+        "{{ATTACHMENT_IMAGE_COUNT}}", attachmentImageFiles.Length,
         "{{IMAGE_ORDER}}", Trim(imageOrder),
         "{{RECOMMENDED_INLINKS}}", BuildBotzRecommendedInlinks(promptSettings),
         "{{ADDITIONAL_NOTES}}", promptSettings["additionalNotes"] != "" ? promptSettings["additionalNotes"] : "NONE",
@@ -3284,68 +3360,57 @@ BuildBotzSourceLog(state) {
     return text
 }
 
-AttachBotzImagesToChatGpt(imageFiles) {
+AttachBotzImagesToChatGpt(imageFiles, supplierName := "BOTZ", logPrefix := "botz") {
     if imageFiles.Length = 0
-        throw Error("No BOTZ images were supplied for ChatGPT attachment.")
+        throw Error("No " supplierName " images were supplied for ChatGPT attachment.")
 
     SplitPath imageFiles[1], , &imagesDir
-    ValidateBotzCtrlAImageFolder(imagesDir, imageFiles)
-
-    existingAttachments := []
-    Loop imageFiles.Length {
-        SplitPath imageFiles[A_Index], &fileName
-        if ChatGptDraftHasAttachment(fileName)
-            existingAttachments.Push(fileName)
-    }
-    if existingAttachments.Length {
-        names := ""
-        for _, fileName in existingAttachments
-            names .= (names = "" ? "" : ", ") fileName
-        throw Error("The ChatGPT draft already contains BOTZ attachment(s): " names ". Clear the draft attachments before retrying the Ctrl+A batch.")
-    }
+    ValidateBotzCtrlAImageFolder(imagesDir, imageFiles, supplierName)
 
     selectionAttempted := false
     try {
-        ToolTip "Opening ChatGPT attachments for " imageFiles.Length " BOTZ images..."
+        ToolTip "Opening ChatGPT attachments for " imageFiles.Length " " supplierName " images..."
         OpenChatGptFilePicker()
         selectionAttempted := true
-        ChooseAllBotzImagesInPicker(imagesDir)
-        verifiedCount := WaitForBotzChatAttachmentBatch(imageFiles)
+        ChooseAllBotzImagesInPicker(imagesDir, supplierName)
+        WaitForBotzChatAttachmentBatch(imageFiles, supplierName)
         for index, imagePath in imageFiles
-            LogText("botz-chatgpt-attachment", "Ctrl+A batch submitted image " index " of " imageFiles.Length ": " imagePath)
-        LogText("botz-chatgpt-attachment", "Ctrl+A batch UIA verification: " verifiedCount " of " imageFiles.Length " filename(s) visible after settling.")
-        if verifiedCount != imageFiles.Length
-            LogText("botz-chatgpt-attachment-warning", "The picker submitted all files with Ctrl+A, but ChatGPT exposed only " verifiedCount " of " imageFiles.Length " filenames through UIA after settling. Automatic submission is still configured to proceed after the wait.")
-        SubmitBotzChatGptDraft()
+            LogText(logPrefix "-chatgpt-attachment", "Batch submitted image " index " of " imageFiles.Length ": " imagePath)
+        LogText(logPrefix "-chatgpt-attachment", "Attachment settle timer completed for " imageFiles.Length " requested image(s).")
+        SubmitBotzChatGptDraft(supplierName, logPrefix)
         ToolTip()
         return true
     } catch as err {
         ToolTip()
         Send "{Esc}"
-        LogText("botz-chatgpt-attachment-error", "Ctrl+A batch failed: " err.Message)
+        LogText(logPrefix "-chatgpt-attachment-error", "Attachment batch failed: " err.Message)
         if selectionAttempted
-            throw Error("The ChatGPT Ctrl+A attachment selection started but did not complete safely. It was not retried, to avoid duplicates: " err.Message)
+            throw Error("The ChatGPT attachment selection started but did not complete safely. It was not retried, to avoid duplicates: " err.Message)
         throw
     }
 }
 
-ValidateBotzCtrlAImageFolder(imagesDir, imageFiles) {
+ValidateBotzCtrlAImageFolder(imagesDir, imageFiles, supplierName := "BOTZ") {
     expected := Map()
     for _, imagePath in imageFiles
         expected[StrLower(imagePath)] := true
 
     foundCount := 0
+    expectedFoundCount := 0
     Loop Files imagesDir "\*", "FD" {
         if InStr(A_LoopFileAttrib, "D")
-            throw Error("The BOTZ images folder contains a subfolder, so Ctrl+A could select the wrong item: " A_LoopFileFullPath)
+            throw Error("The " supplierName " images folder contains a subfolder, so Ctrl+A could select the wrong item: " A_LoopFileFullPath)
         if !RegExMatch(A_LoopFileName, "i)\.(jpe?g|png|webp)$")
-            throw Error("The BOTZ images folder contains an unsupported file, so Ctrl+A was not used: " A_LoopFileFullPath)
-        if !expected.Has(StrLower(A_LoopFileFullPath))
-            throw Error("The BOTZ images folder changed before Ctrl+A selection: " A_LoopFileFullPath)
+            throw Error("The " supplierName " images folder contains an unsupported file, so Ctrl+A was not used: " A_LoopFileFullPath)
+        if expected.Has(StrLower(A_LoopFileFullPath))
+            expectedFoundCount += 1
         foundCount += 1
     }
-    if foundCount != imageFiles.Length
-        throw Error("Ctrl+A folder validation found " foundCount " file(s), but the BOTZ request expects " imageFiles.Length ".")
+    if expectedFoundCount != imageFiles.Length
+        throw Error("Image-folder validation found only " expectedFoundCount " of the " imageFiles.Length " expected " supplierName " images.")
+    if foundCount < imageFiles.Length
+        throw Error("Image-folder validation found fewer files than the " supplierName " request expects.")
+    return foundCount = imageFiles.Length
 }
 
 OpenChatGptFilePicker() {
@@ -3365,10 +3430,24 @@ ChooseSingleFileInPicker(filePath) {
     ChooseFileSelectionInPicker(filePath)
 }
 
-ChooseAllBotzImagesInPicker(imagesDir) {
-    global botzFilePickerTimeoutMs, botzChatPickerFolderLoadMs, botzChatPickerSelectAllMs
+ChooseAllBotzImagesInPicker(imagesDir, supplierName := "BOTZ") {
+    global botzFilePickerTimeoutMs, botzChatPickerSelectAllMs
+    picker := NavigateSupplierImagePickerToFolder(imagesDir, supplierName)
+    FocusWindowsFilePickerList(picker)
+    Sleep 700
+    Send "^a"
+    ToolTip "All " supplierName " images selected.`nWaiting before confirming..."
+    Sleep botzChatPickerSelectAllMs
+    Send "{Enter}"
+
+    if !WinWaitClose("ahk_id " picker, , botzFilePickerTimeoutMs / 1000)
+        throw Error("The Windows file picker did not close after Ctrl+A and confirmation.")
+}
+
+NavigateSupplierImagePickerToFolder(imagesDir, supplierName) {
+    global botzChatPickerFolderLoadMs
     if !DirExist(imagesDir)
-        throw Error("BOTZ images folder no longer exists: " imagesDir)
+        throw Error(supplierName " images folder no longer exists: " imagesDir)
 
     picker := WinExist("A")
     if !picker || !WinActive("ahk_class #32770")
@@ -3379,29 +3458,19 @@ ChooseAllBotzImagesInPicker(imagesDir) {
         A_Clipboard := ""
         A_Clipboard := imagesDir
         if !ClipWait(2)
-            throw Error("The BOTZ images-folder path could not be placed on the clipboard.")
-
+            throw Error("The " supplierName " images-folder path could not be placed on the clipboard.")
         Send "^l"
         Sleep 600
         Send "^a"
         Send "^v"
         Sleep 600
         Send "{Enter}"
-        ToolTip "Waiting for the BOTZ images folder to open..."
+        ToolTip "Waiting for the " supplierName " images folder to open..."
         Sleep botzChatPickerFolderLoadMs
-
-        FocusWindowsFilePickerList(picker)
-        Sleep 700
-        Send "^a"
-        ToolTip "All BOTZ images selected.`nWaiting before confirming..."
-        Sleep botzChatPickerSelectAllMs
-        Send "{Enter}"
-
-        if !WinWaitClose("ahk_id " picker, , botzFilePickerTimeoutMs / 1000)
-            throw Error("The Windows file picker did not close after Ctrl+A and confirmation.")
     } finally {
         A_Clipboard := savedClip
     }
+    return picker
 }
 
 FocusWindowsFilePickerList(picker) {
@@ -3442,65 +3511,26 @@ ChooseFileSelectionInPicker(selectionText) {
     }
 }
 
-WaitForBotzChatAttachmentBatch(imageFiles) {
-    global chatgptWinTitle, botzChatAttachmentSettleMs
+WaitForBotzChatAttachmentBatch(imageFiles, supplierName := "BOTZ") {
+    global botzChatAttachmentSettleMs
     startedAt := A_TickCount
     Loop {
         elapsed := A_TickCount - startedAt
-        ToolTip "Waiting for ChatGPT to process " imageFiles.Length " attachments...`n" Round(elapsed / 1000, 1) " seconds"
+        ToolTip "Waiting for ChatGPT to process " imageFiles.Length " " supplierName " attachments...`n" Round(elapsed / 1000, 1) " seconds"
         if elapsed >= botzChatAttachmentSettleMs
             break
         Sleep 500
     }
-
-    verifiedCount := 0
-    try {
-        ActivateWindow(chatgptWinTitle, 300)
-        document := UIA_Browser().GetCurrentDocumentElement()
-        for _, imagePath in imageFiles {
-            SplitPath imagePath, &fileName
-            if ChatGptDocumentHasAttachment(document, fileName)
-                verifiedCount += 1
-        }
-    }
-    return verifiedCount
+    return true
 }
 
-SubmitBotzChatGptDraft() {
+SubmitBotzChatGptDraft(supplierName := "BOTZ", logPrefix := "botz") {
     global chatgptWinTitle, botzChatAttachmentSettleMs
-    ToolTip "BOTZ attachments settled. Sending the ChatGPT request..."
+    ToolTip supplierName " attachments settled. Sending the ChatGPT request..."
     ActivateWindow(chatgptWinTitle, 300)
     FocusChatGptInputForPaste()
-    LogText("botz-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second BOTZ attachment timer.")
+    LogText(logPrefix "-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second " supplierName " attachment timer.")
     Send "{Enter}"
-}
-
-ChatGptDraftHasAttachment(fileName) {
-    global chatgptWinTitle
-    try {
-        ActivateWindow(chatgptWinTitle, 250)
-        document := UIA_Browser().GetCurrentDocumentElement()
-        return ChatGptDocumentHasAttachment(document, fileName)
-    }
-    return false
-}
-
-ChatGptDocumentHasAttachment(document, fileName) {
-    try elements := document.FindElements({ Name: fileName, mm: 2, cs: 0 })
-    catch
-        return false
-    for _, element in elements {
-        try {
-            exposedName := StrLower(Trim(element.Name))
-            fileNameLower := StrLower(fileName)
-            ; The prompt itself lists every filename. Only an accessibility
-            ; element whose name starts with the filename can be an upload
-            ; chip; prompt paragraphs start with "Image n of ...".
-            if !element.IsOffscreen && InStr(exposedName, fileNameLower) = 1
-                return true
-        }
-    }
-    return false
 }
 
 SaveBotzState(state) {
@@ -3527,7 +3557,7 @@ SaveBotzState(state) {
 }
 
 LoadBotzState() {
-    global botzStateFilePath, botzState
+    global botzStateFilePath, botzState, maximumImagesPerProduct
     if botzState
         return botzState
     if !FileExist(botzStateFilePath)
@@ -3564,6 +3594,8 @@ LoadBotzState() {
     }
     if !IsInteger(values["image_count"]) || Integer(values["image_count"]) < 1 || Integer(values["image_count"]) != images.Length
         throw Error("The saved BOTZ image count is invalid.")
+    if Integer(values["image_count"]) > maximumImagesPerProduct
+        throw Error("The saved BOTZ image count exceeds the GO b2b limit of " maximumImagesPerProduct ". Rebuild the BOTZ prompt to select only the first " maximumImagesPerProduct " images.")
     if stateVersion = "CROMARTIE_BOTZ_STATE_V3" {
         for _, key in ["uploaded_count", "pending_image"] {
             if !values.Has(key) || !IsInteger(values[key])
@@ -3645,6 +3677,7 @@ PasteBotzOutputToCms() {
 }
 
 ValidateBotzSourcesUnchanged(state) {
+    global maximumImagesPerProduct
     if !FileExist(state["productMdPath"])
         throw Error("The saved BOTZ product.md no longer exists: " state["productMdPath"])
     if FileGetSize(state["productMdPath"]) != state["productMdSize"] || FileGetTime(state["productMdPath"], "M") != state["productMdModified"]
@@ -3654,7 +3687,7 @@ ValidateBotzSourcesUnchanged(state) {
     if StrLower(matchedFolder) != StrLower(state["productFolder"])
         throw Error("The exact BOTZ folder match changed after the request was built. Rebuild the BOTZ prompt.")
 
-    currentImages := EnumerateBotzImageFiles(state["productFolder"] "\images")
+    currentImages := EnumerateBotzImageFiles(state["productFolder"] "\images", maximumImagesPerProduct)
     if !BotzPathArraysMatch(currentImages, state["images"])
         throw Error("The BOTZ images folder changed after the ChatGPT request was built. Rebuild the prompt so image order and output fields remain aligned.")
     Loop currentImages.Length {
@@ -3778,7 +3811,7 @@ ParseOrderedAutomationFields(block, expectedLabels) {
         searchFrom := found + StrLen(match[0])
     }
     if Trim(SubStr(text, 1, locations[1]["labelStart"] - 1), " `t`n") != ""
-        throw Error("Unexpected text appears before the first BOTZ automation field.")
+        throw Error("Unexpected text appears before the first product-creation automation field.")
 
     Loop locations.Length {
         item := locations[A_Index]
@@ -4383,10 +4416,10 @@ BuildMatrixImageCountSummary(state) {
 }
 
 ValidateMatrixStateImageTargets(state, availableTargets) {
-    global imageGalleryPageSize, imageGalleryMaxPages
+    global imageGalleryPageSize, imageGalleryMaxPages, maximumImagesPerProduct
     if availableTargets != imageGalleryPageSize
         throw Error("Matrix image pagination requires " imageGalleryPageSize " reusable gallery targets; found " availableTargets ".")
-    maximumImages := imageGalleryPageSize * imageGalleryMaxPages
+    maximumImages := Min(imageGalleryPageSize * imageGalleryMaxPages, maximumImagesPerProduct)
     if state["parentImageCount"] > maximumImages
         throw Error("Saved matrix parent image count exceeds the pagination safety limit of " maximumImages ".")
     for p, product in state["products"] {

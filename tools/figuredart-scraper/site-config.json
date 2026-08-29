@@ -1,0 +1,14 @@
+{
+  "storefrontBaseUrl": "https://uk.figuredart.com",
+  "searchEndpoint": "https://services.mybcapps.com/bc-sf-filter/search",
+  "searchShop": "ukpassion.myshopify.com",
+  "searchCallback": "BoostPFSFilterCallback",
+  "descriptionSelectors": [
+    "#home.tab-pane",
+    "#home"
+  ],
+  "howItWorksSelectors": [
+    "#tab1.tab-pane",
+    "#tab1"
+  ]
+}

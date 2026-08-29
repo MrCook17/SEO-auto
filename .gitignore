@@ -2,5 +2,8 @@ logs/
 backups/
 debug/
 tools/botz-scraper/node_modules/
+tools/figuredart-scraper/node_modules/
 state/botz-prompt-settings.txt
 state/botz-prompt-settings.txt.tmp
+state/figuredart-product-state.txt
+state/figuredart-product-state.txt.tmp

@@ -75,7 +75,11 @@ Complete current `product.md` contents:
 {{PRODUCT_MD_CONTENT}}
 ===PRODUCT_MD_END===
 
-Actual attached image count:
+Actual ChatGPT attachment count:
+
+{{ATTACHMENT_IMAGE_COUNT}}
+
+GO b2b image count to process (the first attachments only):
 
 {{IMAGE_COUNT}}
 
@@ -128,7 +132,7 @@ Create the normal full-product workflow values:
 - SEO meta title
 - SEO meta description
 - Complete CMS-ready HTML product description
-- A distinct CMS Name, Title and Alt text value for every attached image
+- A distinct CMS Name, Title and Alt text value for each of the first `{{IMAGE_COUNT}}` attachments that will be entered into GO b2b
 
 ## Product-page SEO rules
 
@@ -364,9 +368,9 @@ Do not infer a fired result from an unfired liquid, packaging or product name.
 
 ## Image rules
 
-Process images in the **exact attachment order** supplied above.
+Process the first `{{IMAGE_COUNT}}` images in the **exact attachment order** supplied above.
 
-For every image return:
+For every processed GO b2b image return:
 
 - `IMAGE_n_NAME`
 - `IMAGE_n_TITLE`
@@ -433,7 +437,7 @@ Fired/sample images should describe the visible sample and not imply packaging i
 
 ### Distinctness
 
-For every image:
+For every processed GO b2b image:
 
 - Name, Title and Alt must all be present.
 - They must be meaningfully distinct.
@@ -442,11 +446,11 @@ For every image:
 
 ## Attachment authority
 
-`IMAGE_COUNT` must equal:
+There are `{{ATTACHMENT_IMAGE_COUNT}}` actual ChatGPT attachments. `IMAGE_COUNT` must equal:
 
 {{IMAGE_COUNT}}
 
-Process exactly that many images.
+Return image fields for exactly the first `{{IMAGE_COUNT}}` attachments. Later attachments are product-reference context only; do not return `IMAGE_n_NAME`, `IMAGE_n_TITLE` or `IMAGE_n_ALT` fields for them.
 
 The attachment order is:
 
@@ -454,12 +458,12 @@ The attachment order is:
 
 Do not use an image list inside `product.md` to:
 
-- change the count
-- change the order
+- change the GO b2b image count
+- change the first-attachment processing order
 - invent a missing image
-- omit an attachment
+- create output fields for a reference-only attachment
 
-The actual attachments are authoritative.
+The numbered attachment mapping above is authoritative for which attachments are processed and which are reference only.
 
 ## Final QA before responding
 
@@ -486,8 +490,8 @@ Internally verify all of the following:
 - HTML uses inline CSS only.
 - No unsupported facts have been added.
 - No internal SEO terminology appears in customer-facing copy.
-- Every attached image has Name, Title and Alt.
-- Every image field matches the correct attachment number.
+- Each of the first `{{IMAGE_COUNT}}` attachments has Name, Title and Alt.
+- Every processed image field matches the correct attachment number.
 - Image Title and Alt are not identical.
 - IMAGE_n_NAME begins with the verified product code where available.
 - No stale `product.md` image-list information has affected processing.
