@@ -49,9 +49,14 @@ chatgptWinTitle := "Colour & Glaze"
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
 ; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
 ; "figuredart" = Figured'Art Product Creation from the matching C:\FiguredArt product folder
+; "promotion_text" = paste the configured promotional text into Description and Custom
 ; This is the fallback used by older settings files. Saving the
 ; Ctrl+Shift+NumLock menu persists the selected mode across reloads.
 SeoAutomationMode := "full"
+
+; PROMOTION TEXT TEST-SAVE SWITCH: change false to true to click the main
+; product Save button and allow department-wide promotion_text runs.
+promotionTextSaveEnabled := true
 
 promptDir := A_ScriptDir "\prompts"
 FullPromptTemplatePath := promptDir "\prompt-template.md"
@@ -101,6 +106,7 @@ global botzState := 0
 global figuredArtState := 0
 global botzPromptSettings := 0
 global botzPromptSettingsGui := 0
+global promotionText := ""
 global activeMatrixParentProductName := ""
 global activeCmsProductCode := ""
 global lastSavedNonMatrixProductIdentity := 0
@@ -219,6 +225,10 @@ coords := Map(
     "meta_title", [874, 383],
     "html_snippet", [876, 553],
     "meta_description", [900, 806],
+    "promotion_description_field", [837, 861],
+    ; Custom tab
+    "custom_tab", [1263, 260],
+    "promotion_custom_field", [932, 373],
     ; Images tab
     "image", [399, 454],
     "image_details_button", [319, 555],
@@ -419,7 +429,10 @@ OpenProductBuildPromptAndPasteToChatGPT() {
             throw Error("NumpadEnter is not used for matrix-image mode. Open the matrix parent and press Numpad4.")
 
         ClickPoint("product_edit_button", 1500)
-        if IsSupplierProductCreationMode()
+        if IsPromotionTextMode() {
+            RunPromotionTextWorkflow()
+            return
+        } else if IsSupplierProductCreationMode()
             BuildSupplierProductCreationPrompt(pageUrl)
         else if IsMatrixFullMode()
             BuildMatrixFullPrompt(pageUrl)
@@ -453,6 +466,8 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
     ; Use the temporary hardcoded public URL for {{PAGE_URL}}. Do not copy the
     ; browser URL because the active page is a GO b2b CMS URL.
     pageUrl := hardcodedPageUrl
+    if IsPromotionTextMode()
+        return RunPromotionTextWorkflow()
     if IsSupplierProductCreationMode()
         BuildSupplierProductCreationPrompt(pageUrl)
     else if IsMatrixFullMode()
@@ -550,12 +565,12 @@ ValidateSeoAutomationMode() {
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz' or 'figuredart'.")
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart' or 'promotion_text'.")
     }
 }
 
 GetSeoAutomationModeOptions() {
-    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart"]
+    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text"]
 }
 
 IsValidSeoAutomationMode(mode) {
@@ -607,6 +622,10 @@ IsBotzMode() {
 
 IsFiguredArtMode() {
     return GetSeoAutomationMode() = "figuredart"
+}
+
+IsPromotionTextMode() {
+    return GetSeoAutomationMode() = "promotion_text"
 }
 
 IsSupplierProductCreationMode() {
@@ -1623,6 +1642,7 @@ StartDepartmentAutomation() {
     global departmentStopAfterCurrent, automaticWorkflowActive
     global departmentCatalogueWaitMs
     global lastSavedNonMatrixProductIdentity
+    global promotionTextSaveEnabled
 
     ValidateSeoAutomationMode()
     departmentWorkflowMode := GetSeoAutomationMode()
@@ -1630,6 +1650,10 @@ StartDepartmentAutomation() {
 
     if !departmentAutomationEnabled {
         MsgBox "Department automation is OFF.`n`nPress Ctrl+Alt+D to turn it on, open the first " departmentProductType " Overview tab, then press Ctrl+Numpad4."
+        return false
+    }
+    if IsPromotionTextMode() && !promotionTextSaveEnabled {
+        MsgBox "Department promotion-text automation was not started because test mode does not save or leave the current product.`n`nAfter the single-product test succeeds, change promotionTextSaveEnabled := false to true near the top of this script, reload it, then use the normal department keybinds."
         return false
     }
     if departmentAutomationActive {
@@ -2399,6 +2423,65 @@ ParseAutomationOutput(block, imageCount, metadataOnly := false) {
 ; CMS INSERTION HELPERS
 ; ==========================================================
 
+RunPromotionTextWorkflow() {
+    global cmsWinTitle, promotionText, promotionTextSaveEnabled
+    global lastSavedNonMatrixProductIdentity
+
+    textToPaste := Trim(promotionText, " `t`r`n")
+    if textToPaste = ""
+        throw Error("Promotional text is blank. Enter it in Ctrl+Shift+NumLock and save the settings first.")
+
+    ActivateWindow(cmsWinTitle)
+    ClearActiveCmsProductCode()
+
+    ; Capture the exact simple-product identity before editing so department
+    ; automation can find the completed catalogue row after Save.
+    ClickPoint("overview_tab", 500)
+    currentProductCode := SetActiveCmsProductCode(CopyFromPoint("stock_code"))
+    completedProductName := CleanText(CopyFromPoint("product_name"))
+    if completedProductName = ""
+        throw Error("The current GO b2b Product Name is blank, so the promotion-text product cannot be identified safely.")
+
+    ; Description keeps the promotional field at the bottom of the page.
+    ; Allow the tab panel to finish opening before scrolling its page body.
+    ClickPoint("description_tab", 1200)
+    ScrollPromotionDescriptionToBottom()
+    PasteToPoint("promotion_description_field", textToPaste)
+
+    ClickPoint("custom_tab", 600)
+    PasteToPoint("promotion_custom_field", textToPaste)
+
+    LogText(
+        "promotion-text",
+        "Product name: " completedProductName
+        . "`nProduct code: " currentProductCode
+        . "`nSave enabled: " (promotionTextSaveEnabled ? "yes" : "no")
+        . "`n`nPromotional text:`n" textToPaste
+    )
+
+    if promotionTextSaveEnabled {
+        lastSavedNonMatrixProductIdentity := Map(
+            "productName", completedProductName,
+            "productCode", currentProductCode
+        )
+        ClickPoint("product_save_button", 1000)
+        Flash("Promotional text pasted into Description and Custom, then the product was saved.", 3000)
+    } else {
+        Flash("Promotional text pasted into Description and Custom.`nTEST MODE: the product was not saved.", 3500)
+    }
+    return true
+}
+
+ScrollPromotionDescriptionToBottom() {
+    ; Do not send Ctrl+End here. The Description tab button still has keyboard
+    ; focus after it is clicked, and GO b2b's tab strip can interpret End as a
+    ; request to activate its final (Custom) tab. Native wheel input over a blank
+    ; part of the page body scrolls Description without changing tabs.
+    MouseMove 1550, 700, 0
+    SendNativeMouseWheel(-1, 120)
+    Sleep 700
+}
+
 InsertProductNameRecommendation(productNameRecommendation) {
     ClickPoint("overview_tab", 600)
     PasteToPoint("product_name", productNameRecommendation)
@@ -2886,11 +2969,12 @@ InitialiseSeoPromptSettings() {
 }
 
 ApplySharedSeoPromptSettings(settings) {
-    global SeoAutomationMode, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault
+    global SeoAutomationMode, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault, promotionText
     SeoAutomationMode := settings["seoAutomationMode"]
     hardcodedPageUrl := settings["pageUrl"]
     requiredInternalLinksDefault := BuildBotzRecommendedInlinks(settings)
     additionalProductNotesDefault := settings["additionalNotes"] != "" ? settings["additionalNotes"] : "NONE"
+    promotionText := settings["promotionText"]
 }
 
 CreateDefaultBotzPromptSettings() {
@@ -2904,7 +2988,8 @@ CreateDefaultBotzPromptSettings() {
         "inlink2Name", "",
         "inlink2Url", "",
         "inlinkExtra", "",
-        "additionalNotes", ""
+        "additionalNotes", "",
+        "promotionText", ""
     )
 }
 
@@ -2933,6 +3018,12 @@ OpenSeoPromptSettingsGui() {
     controls["seoAutomationMode"] := settingsGui.AddDropDownList("xm y+4 w260", GetSeoAutomationModeOptions())
     controls["seoAutomationMode"].Choose(GetSeoAutomationModeOptionIndex(GetSeoAutomationMode()))
     settingsGui.AddText("xm y+6 w700", "Department runs: matrix modes process Matrix Product rows; all other modes process Simple Product rows.")
+
+    controls["promotionTextLabel"] := settingsGui.AddText("xm y+14", "Promotional text")
+    controls["promotionText"] := settingsGui.AddEdit("xm y+4 w700 r5", botzPromptSettings["promotionText"])
+    controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Used only by promotion_text mode. It is pasted into both the Description and Custom fields.")
+    controls["seoAutomationMode"].OnEvent("Change", UpdatePromotionTextSettingsControls.Bind(controls))
+    UpdatePromotionTextSettingsControls(controls)
 
     settingsGui.AddText("xm y+14", "Cromartie page URL")
     controls["pageUrl"] := settingsGui.AddEdit("xm y+4 w700", botzPromptSettings["pageUrl"])
@@ -2977,7 +3068,8 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
         "inlink2Name", Trim(controls["inlink2Name"].Value),
         "inlink2Url", Trim(controls["inlink2Url"].Value),
         "inlinkExtra", Trim(controls["inlinkExtra"].Value),
-        "additionalNotes", Trim(controls["additionalNotes"].Value)
+        "additionalNotes", Trim(controls["additionalNotes"].Value),
+        "promotionText", Trim(controls["promotionText"].Value, " `t`r`n")
     )
 
     try {
@@ -2994,6 +3086,13 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
     }
 }
 
+UpdatePromotionTextSettingsControls(controls, *) {
+    enabled := StrLower(Trim(controls["seoAutomationMode"].Text)) = "promotion_text"
+    controls["promotionTextLabel"].Enabled := enabled
+    controls["promotionText"].Enabled := enabled
+    controls["promotionTextHelp"].Enabled := enabled
+}
+
 CloseSeoPromptSettingsGui(settingsGui, *) {
     global botzPromptSettingsGui
 
@@ -3004,6 +3103,10 @@ CloseSeoPromptSettingsGui(settingsGui, *) {
 ValidateBotzPromptSettings(settings) {
     if !settings.Has("seoAutomationMode") || !IsValidSeoAutomationMode(settings["seoAutomationMode"])
         throw Error("Select a valid SEO automation mode.")
+    if !settings.Has("promotionText")
+        throw Error("The promotion-text setting is missing.")
+    if settings["seoAutomationMode"] = "promotion_text" && Trim(settings["promotionText"], " `t`r`n") = ""
+        throw Error("Enter the promotional text before saving promotion_text mode.")
     if settings["pageUrl"] = ""
         throw Error("The Cromartie page URL cannot be blank.")
     if !IsBotzHttpUrl(settings["pageUrl"])
@@ -3038,6 +3141,7 @@ SaveBotzPromptSettings(settings) {
     text .= "inlink_2_url`t" EncodeStateValue(settings["inlink2Url"]) "`n"
     text .= "inlink_extra`t" EncodeStateValue(settings["inlinkExtra"]) "`n"
     text .= "additional_notes`t" EncodeStateValue(settings["additionalNotes"]) "`n"
+    text .= "promotion_text`t" EncodeStateValue(settings["promotionText"]) "`n"
 
     temporaryPath := botzPromptSettingsFilePath ".tmp"
     if FileExist(temporaryPath)
@@ -3082,6 +3186,8 @@ LoadBotzPromptSettings() {
             throw Error("The BOTZ prompt settings file is missing: " fileKey ".")
         settings[settingKey] := values[fileKey]
     }
+    ; Keep settings files saved before promotion_text mode backward compatible.
+    settings["promotionText"] := values.Has("promotion_text") ? values["promotion_text"] : ""
     ; Files saved before the mode dropdown existed remain valid and retain the
     ; configured SeoAutomationMode from the top of this script until next save.
     settings["seoAutomationMode"] := values.Has("seo_automation_mode")

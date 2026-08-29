@@ -8,6 +8,7 @@ In product page:
 Overview tab button: x: 288, y: 260
 Description tab button: x: 378, y: 261
 Images tab button: x: 457, y: 260
+Custom tab button: x: 1263, y: 260
 Save button (required to leave product page): x: 1626, y: 996
 
 In overview page (within product page):
@@ -17,6 +18,10 @@ In description page (within product page):
 Meta title field: x: 874, y: 383
 Meta description field: x: 900, y: 806
 HTML snippet field: x: 876, y: 553
+Promotional text field after scrolling to the bottom: x: 837, y: 861
+
+In custom page (within product page):
+Promotional text field: x: 932, y: 373
 
 In images page (within product page):
 Image: x: 399, y: 454
