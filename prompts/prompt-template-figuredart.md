@@ -1,10 +1,40 @@
 # Cromartie Figured'Art Product Creation
 
-Create accurate Cromartie product content and image metadata for one Figured'Art product.
+Create high-quality Cromartie product content and image metadata for one **Figured'Art paint-by-numbers product**.
 
-This request is part of an automated workflow. Follow the output contract exactly.
+This request is part of an automated workflow.
 
-## Factual source policy
+**Do not remove, rename, reorder or alter any automated input or output field.**
+
+## Critical instruction — do not generate images
+
+The supplied images are **reference images only**.
+
+You must:
+
+- inspect the attached images
+- use them to understand what the product and artwork genuinely look like
+- create text-only CMS image Name, Title and Alt metadata
+
+You must **never**:
+
+- generate a new image
+- edit an image
+- recreate an image
+- enhance an image
+- call an image-generation tool
+- return image files
+- return visual mock-ups
+
+The only image-related output required is the existing text metadata:
+
+- `IMAGE_n_NAME`
+- `IMAGE_n_TITLE`
+- `IMAGE_n_ALT`
+
+---
+
+# Factual source policy
 
 Use only these sources for product facts:
 
@@ -28,11 +58,13 @@ The `product.md` was created from the exact supplier SKU and may contain:
 - Additional Product Information
 - an old Images list
 
-Treat factual values in those populated sections as product-specific. Consolidate repeated facts naturally, but do not add facts that are absent.
+Treat populated factual sections as authoritative for this exact product.
 
-The Source URL is provenance only. Do not browse it and do not include it in the customer-facing copy.
+Consolidate repeated information naturally rather than copying supplier text mechanically.
 
-If `product.md` contains an Images section, ignore that section completely. The actual attachments and attachment order in this request are authoritative.
+The Source URL is provenance only. Do not browse it and do not include it in customer-facing content.
+
+If `product.md` contains an Images section, **ignore it completely**. The actual attachments and attachment order in this request are authoritative.
 
 Do not invent or infer unsupported:
 
@@ -40,24 +72,36 @@ Do not invent or infer unsupported:
 - framed or unframed state
 - canvas, support or wood-slice material
 - wood-slice diameter
-- paint type, colours or number of paint pots
-- brushes, tools, hooks, screws or other kit contents
-- difficulty level
+- paint type
+- number of paint colours or pots
+- brushes or tools
+- hooks or screws
+- kit contents
+- difficulty
 - recommended age
-- safety or non-toxicity claims
-- skill or experience requirements
+- safety or non-toxicity
+- skill requirements
 - packaging
 - mounting method
-- artist attribution or licensing
+- artist attribution
+- copyright/licensing
 - suitability for children
 - drying time
 - completion time
-- design details not visible or stated
-- stock, availability, price or delivery claims
+- stock
+- price
+- availability
+- delivery
 
-Visible subject matter, colours and composition may be described from an attachment when genuinely clear. Do not turn visual observations into unsupported technical claims.
+Visible subject matter, colours and composition **may** be described when genuinely clear in the supplied images.
 
-## Automated product inputs
+For example, if the image clearly shows a parrot among tropical leaves, describe that visual scene naturally.
+
+Do not turn a visual observation into a technical claim.
+
+---
+
+# Automated product inputs — do not alter
 
 Configured Cromartie page URL (context only; do not browse it):
 
@@ -70,7 +114,9 @@ Exact GO b2b product name:
 Complete current Figured'Art `product.md`:
 
 ===PRODUCT_MD_START===
+
 {{PRODUCT_MD_CONTENT}}
+
 ===PRODUCT_MD_END===
 
 Actual ChatGPT attachment count:
@@ -85,12 +131,14 @@ Attachment order:
 
 {{IMAGE_ORDER}}
 
-## Recommended internal links — manual input
+# Recommended internal links — manual input
 
 Use only the following manually supplied internal links when genuinely useful:
 
 ===RECOMMENDED_INLINKS_START===
+
 {{RECOMMENDED_INLINKS}}
+
 ===RECOMMENDED_INLINKS_END===
 
 This area may contain up to two links or `NONE`.
@@ -98,24 +146,31 @@ This area may contain up to two links or `NONE`.
 Rules:
 
 - These links are navigation suggestions, not factual product sources.
-- Do not browse them or infer product facts from their destinations.
+- Do not browse them.
+- Do not infer product facts from their destinations.
 - Do not invent replacement links.
 - If `NONE`, do not add links.
 - Use no more than two supplied links.
 - Every `<a>` must have a descriptive `title` attribute.
-- Use natural customer-facing anchor or CTA wording.
-- Prefer the established purple Cromartie CTA styling where appropriate.
-- Do not add an otherwise unnecessary paragraph solely to hold a link.
+- Use natural customer-facing CTA wording.
+- Prefer the established purple Cromartie CTA styling.
+- Do not add an unnecessary paragraph solely to contain a link.
 
-## Additional notes — manual input
+# Additional notes — manual input
 
 ===ADDITIONAL_NOTES_START===
+
 {{ADDITIONAL_NOTES}}
+
 ===ADDITIONAL_NOTES_END===
 
-Use relevant supplied facts or editorial instructions without extending them through assumptions. If this area contains `NONE`, there are no additional notes.
+Use relevant supplied facts or editorial instructions without extending them through assumptions.
 
-## Required content
+If this area contains `NONE`, there are no additional notes.
+
+---
+
+# Required content
 
 Create:
 
@@ -125,155 +180,638 @@ Create:
 - Complete CMS-ready HTML product description
 - A distinct CMS Name, Title and Alt value for each of the first `{{IMAGE_COUNT}}` attachments that will be entered into GO b2b
 
-Use UK English throughout. Use `colour`, not `color`, except where an exact supplied proper name requires otherwise.
+Use UK English throughout.
 
-## Product terminology
+Use `colour`, not `color`, except where an exact proper name requires otherwise.
+
+---
+
+# Primary writing objective
+
+The product description must be **interesting, useful, product-specific and commercially helpful**.
+
+It should resemble the quality and depth of this approach:
+
+> Explain exactly what the customer will paint, what physical kit they receive, what the supplied format is, how paint by numbers works, what the finished artwork looks like, and how it can be displayed where supported.
+
+Do **not** produce thin descriptions where the first paragraph simply lists:
+
+`subject + dimensions + easy difficulty`
+
+and the second paragraph simply repeats the kit contents.
+
+The page should help a customer answer:
+
+- What am I buying?
+- What does the artwork look like?
+- What makes this particular design appealing?
+- What format is supplied?
+- What does the kit include?
+- How do I actually use it?
+- What can I do with the finished piece?
+- Is it framed or display-ready, if verified?
+
+Use the supplied images to make the **design-specific visual description** meaningful.
+
+---
+
+# Product terminology
 
 Identify the exact product type from `product.md`.
 
-Possible products include mini paint-by-numbers kits on framed canvas and paint-by-numbers kits on wood slices, but these are examples rather than universal facts.
+Common Figured'Art products in this workflow include:
 
-Use the most accurate supported wording, such as:
+- mini framed paint-by-numbers kits
+- framed canvas paint-by-numbers kits
+- paint-by-numbers wood slice kits
+
+These are examples, not universal facts.
+
+Use accurate supported terminology such as:
 
 - paint by numbers
 - paint-by-numbers kit
+- numbered canvas
+- linen canvas
 - framed canvas
+- wooden frame
 - wood slice
 - acrylic paint
+- numbered paint pots
+- nylon brushes
 
-Do not call a wood-slice product a canvas kit. Do not call a canvas product a wood-slice kit. Do not describe a product as framed unless that exact product is stated to be framed.
+Do not:
 
-`Figured'Art` is the supplier/brand spelling. Use it only where natural and useful; do not force it into every field.
+- call a wood-slice product a canvas kit
+- call a canvas product a wood-slice kit
+- describe a product as framed unless verified
+- assume every Figured'Art product contains identical components
 
-## Product name recommendation
+`Figured'Art` is the correct brand spelling.
 
-Recommend a clear, customer-friendly Cromartie name using the exact design and product type.
+Use the brand naturally. Do not force `Figured'Art` into every sentence.
 
-Where supported, useful patterns may include:
+---
 
-- `[Design] Mini Paint by Numbers Kit 20 x 20cm - Framed`
-- `[Design] Paint by Numbers Wood Slice Kit`
+# Product name recommendation
 
-These are examples, not mandatory templates.
+Recommend a clear, customer-friendly Cromartie product name based on the exact design and verified product format.
+
+Useful patterns where supported include:
+
+### Mini framed canvas
+
+`[Design] Mini Paint by Numbers Kit 20 x 20cm - Framed`
+
+### Wood slice
+
+`[Design] Paint by Numbers Wood Slice Kit 30cm`
+
+These are patterns, not mandatory templates.
 
 Rules:
 
-- Preserve the exact design identity.
-- Make product type and size clear when verified.
-- Include framed state only when verified.
-- Do not include the product code by default.
-- Do not invent a size or format.
-- Avoid awkward supplier-style word order.
-- If the current name is already best, return `KEEP CURRENT PRODUCT NAME`.
+- Preserve the recognisable design identity.
+- Make the product type obvious.
+- Include size where verified and useful.
+- Include framed state only where verified.
+- Do not include the SKU by default.
+- Avoid awkward supplier-style wording.
+- Do not unnecessarily repeat `Figured'Art` if the cleaner customer-facing name works without it.
+- If the current product name is already strongest, return `KEEP CURRENT PRODUCT NAME`.
 
-The recommendation applies only to `PRODUCT_NAME_RECOMMENDATION`. Do not mechanically repeat its punctuation or word order in every other field.
+The recommendation applies only to `PRODUCT_NAME_RECOMMENDATION`.
 
-## Metadata
+Do not mechanically copy its punctuation or word order into metadata, headings or image tags.
 
-### Meta title
+---
 
-- Focus on the exact product.
-- Use the design name and product type naturally.
-- Include size or framed state only when verified and useful.
+# SEO metadata
+
+The product page should target the **exact design + paint-by-numbers product type + useful verified format/size information**.
+
+Avoid turning every product into generic wording such as:
+
+`paint by numbers kit`
+
+without clearly identifying the exact design.
+
+## Meta title
+
+Create a concise, useful exact-product title.
+
+Prioritise:
+
+1. Design name
+2. Paint by numbers
+3. Important format such as framed/wood slice
+4. Size where useful
+
+Rules:
+
+- Keep under 60 characters where practical.
 - Do not include the SKU by default.
 - Do not append `Cromartie`.
-- Keep under 60 characters where practical.
-- Avoid repetitive keyword strings.
+- Avoid keyword stuffing.
+- Do not create an awkward list of synonyms.
+- Make neighbouring Figured'Art products distinguishable in search results.
 
-### Meta description
+Possible natural patterns:
 
-- Describe the exact product and its most useful verified buying detail.
-- Keep under 160 characters where practical.
-- Prefer a natural complete sentence.
-- Mention kit contents, format, ease, framing or support only when supplied for the exact product.
-- Do not mention stock, price, popularity, delivery or unsupported age suitability.
-- Vary wording naturally between products.
+`Santorini Sunrise Mini Paint by Numbers Kit`
 
-## CMS HTML
+`Tropical Parrot Framed Paint by Numbers Kit`
 
-Use the normal Cromartie visual language from `cromartie_flexible_cms_styling_guidance_updated.md` where available. Use inline CSS only.
+`Lavender Paint by Numbers Wood Slice Kit`
 
-Use this outer wrapper:
+Adapt naturally to the exact product.
+
+## Meta description
+
+Create a genuinely useful product-specific description.
+
+Aim for roughly 140–155 characters where practical and remain under 160 characters where possible.
+
+Use one or two strong verified selling points.
+
+Possible angles include:
+
+- the specific artwork/design
+- framed canvas format
+- wood-slice format
+- numbered acrylic paints
+- supplied brushes
+- display-ready nature
+- reference image
+- straightforward paint-by-number process
+- wall fixings
+
+Do not try to fit every specification into the meta description.
+
+Avoid repetitive range-wide formulas.
+
+Do not start every product with `Shop`.
+
+Avoid generic filler such as:
+
+- perfect
+- ideal
+- stunning
+- premium
+- must-have
+- endless creativity
+- unleash your creativity
+- fun for everyone
+
+unless directly supported and genuinely useful.
+
+The meta description should sound like it was written for **this artwork**, not generated from a single template for 30 products.
+
+---
+
+# CMS HTML styling
+
+Use `cromartie_flexible_cms_styling_guidance_updated.md` where available as the HTML styling reference.
+
+Use inline CSS only.
+
+Use this wrapper:
 
 ```html
-<div style="font-family: Open Sans, sans-serif; font-size:15px; line-height:1.7; color:#444;"></div>
+<div
+  style="font-family: Open Sans, sans-serif; font-size:15px; line-height:1.7; color:#444;"
+></div>
 ```
 
 Do not include an `<h1>`.
 
-Create a useful, customer-facing page rather than copying `product.md` mechanically. Preserve all genuinely useful supplied information without padding the page with unsupported claims.
+The preferred structure is:
 
-A strong structure normally includes:
+1. Product-specific `<h2>`
+2. Two substantial product-specific paragraphs
+3. `How Does Paint by Numbers Work?`
+4. `What's Included`
+5. Purple product specification table
+6. Artist/rights note where supplied
+7. Up to two supplied internal-link CTA buttons
 
-1. One descriptive `<h2>` that does not simply repeat the product name
-2. One or two focused introductory paragraphs
-3. A concise `How Does It Work?` section when instructions are supplied
-4. A clear `What's Included` list when kit contents are supplied
-5. A purple Cromartie specification table when enough structured facts exist
-6. Up to two supplied internal-link CTAs where useful
+Omit a section only when the required facts genuinely are not supplied.
 
-Omit a section when its facts are not supplied. Do not create empty headings or filler copy.
+---
 
-### Main copy
+# H2 quality
 
-Explain:
+The H2 must explain the **product and design**, not merely describe the image poetically.
 
-- what the exact product is
-- the design or visible subject
-- its verified format and size
-- what the customer receives
-- how the activity works where instructions are supplied
-- useful verified framing, mounting or support information
+Prefer headings such as:
 
-Keep sentences straightforward and welcoming. Avoid exaggerated claims such as `perfect for everyone`, `guaranteed masterpiece`, `professional result` or unsupported therapeutic/educational benefits.
+`Mini Framed Paint by Numbers Kit with Santorini Travel Poster Design`
 
-You may retain a modest customer-facing benefit already present in the supplied source, but do not amplify it into a guarantee.
+`Mini Framed Paint by Numbers Kit with Tropical Parrot Design`
 
-### How Does It Work?
+`Paint by Numbers Wood Slice Kit with Lavender Design`
 
-When `product.md` supplies the section:
+Avoid weak headings such as:
 
-- preserve all meaningful steps
-- present them in a clear ordered list
-- correct obvious encoding artefacts or minor grammar without changing meaning
-- avoid duplicating the same instructions elsewhere
-- do not add preparation, drying, sealing, cleaning or safety instructions that were not supplied
+`Paint a Colourful Parrot Among Tropical Leaves`
 
-### What's Included
+`Create Your Own Beautiful Artwork`
 
-When supplied, use a concise `<ul>` and preserve the exact quantities and materials.
+`Discover Tropical Creativity`
 
-Do not generalise contents from another kit. For example, do not assume every product includes the same number of brushes, wall fixings, reference picture, paints or packaging.
+The H2 should immediately tell a customer **what the product is**.
 
-### Specification table
+Useful pattern:
 
-When enough verified structured information is present, use the purple Cromartie specification-table styling.
+`[Format/Product Type] with [Design/Subject]`
 
-Potential rows include:
+Do not simply repeat the H1/product name word-for-word.
+
+---
+
+# Main description — exactly two strong paragraphs
+
+Write **two substantial `<p>` tags** before the instructional sections.
+
+Each paragraph should do a different job.
+
+Do not create a third normal description paragraph.
+
+## Paragraph 1 — product, design and what the customer receives
+
+The first paragraph should naturally introduce:
+
+- Figured'Art where useful
+- exact design name
+- paint-by-numbers format
+- verified size
+- verified canvas/wood-slice/frame format
+- the main activity
+- one or two important verified kit components
+
+Then help the customer picture the product.
+
+A good opening style is:
+
+> Bring [specific scene/design] to life with the Figured'Art [design] paint-by-numbers kit.
+
+or another natural variation.
+
+Do not use that exact sentence for every product.
+
+The paragraph should feel specific to the artwork.
+
+For example, when clearly visible, describe:
+
+- architecture
+- animals
+- landscape
+- flowers
+- travel-poster styling
+- recognisable landmarks
+- dominant colours
+- composition
+
+Do not invent details that cannot genuinely be seen.
+
+### Avoid
+
+Thin wording like:
+
+> Create a tropical scene. This is a 20 x 20cm paint-by-numbers kit with an easy difficulty level.
+
+This wastes the paragraph on specifications without explaining why the design is interesting.
+
+## Paragraph 2 — visual result, process and display
+
+Use the second paragraph to expand on:
+
+- what the finished artwork visibly depicts
+- how the numbered system works
+- use of the reference image
+- matching numbered paint to numbered sections
+- display/hanging details where verified
+
+This should add useful buying context rather than repeating the first paragraph.
+
+Where wall fixings are supplied, explain naturally that they can be used to display the finished artwork.
+
+Where the product is a wood slice rather than framed canvas, adapt the paragraph accordingly.
+
+Do not force framed-canvas wording onto other product formats.
+
+---
+
+# Design-specific writing
+
+One of the most important requirements is that each Figured'Art description must feel specific to its artwork.
+
+Use attached product images to identify visible details such as:
+
+- main subject
+- setting
+- art style
+- dominant visual features
+- recognisable landmarks
+- animals
+- flowers/plants
+- composition
+- significant colours
+
+For example, a Santorini design may genuinely support wording about:
+
+- white buildings
+- pink buildings
+- blue domes
+- sea
+- pale sun
+- travel-poster composition
+
+A Tropical Parrot design should instead describe the actual parrot, foliage, branch, colour palette and composition visible in that artwork.
+
+Do not reduce every design to:
+
+`a colourful scene`
+
+when more useful visible information exists.
+
+Do not invent a story, location, species, landmark or object that is not clear.
+
+---
+
+# How Does Paint by Numbers Work?
+
+When `product.md` supplies instructions, include:
+
+```html
+<h3
+  style="color:#76689A; font-size:1.25em; font-weight:bold; margin:20px 0 10px;"
+>
+  How Does Paint by Numbers Work?
+</h3>
+```
+
+Then use an ordered list.
+
+Aim for approximately 3–5 useful steps.
+
+Preserve the full practical meaning of the supplier information.
+
+A strong structure is:
+
+1. Familiarise yourself with the numbered design/reference image.
+2. Match a numbered section to its corresponding numbered paint.
+3. Paint the sections using the supplied brushes.
+4. Complete and display the artwork where supported.
+
+Make the wording natural and specific to the verified kit contents.
+
+Do not add unsupported:
+
+- preparation instructions
+- drying instructions
+- varnishing
+- sealing
+- cleaning
+- safety guidance
+- painting techniques
+
+Avoid rewriting the steps into vague filler such as:
+
+`Enjoy painting your masterpiece.`
+
+The section should genuinely explain the process.
+
+---
+
+# What's Included
+
+When supplied, use:
+
+```html
+<h3
+  style="color:#76689A; font-size:1.25em; font-weight:bold; margin:20px 0 10px;"
+>
+  What's Included
+</h3>
+```
+
+Then a concise `<ul>`.
+
+Preserve exact supplied quantities.
+
+For example, only where verified:
+
+- 1 numbered linen canvas
+- 3 different-sized nylon brushes
+- numbered pots of acrylic paint
+- miniature image/reference image
+- 2 screws
+- 2 wall hooks
+
+Do not assume those contents apply to every Figured'Art product.
+
+Do not include packaging here merely to make the list longer.
+
+---
+
+# Product specification table
+
+When structured facts are available, include the purple Cromartie specification table.
+
+For the common mini framed range, useful verified rows may include:
 
 - Product code
-- Product type or method
-- Design/model
-- Finished size
-- Support/material
+- Method
+- Design
+- Size
+- Support
 - Frame
 - Paint type
 - Difficulty level
 - Packaging
-- Wood-slice diameter
-- Other exact factual specifications
 
-Include only useful rows supported for the exact product. The product code may appear in the table even when it is omitted from metadata and prose.
+For wood-slice products, adapt the rows appropriately.
 
-Consolidate duplicate source rows, such as the same size stated twice. Do not show conflicting or redundant rows merely because both appear in `product.md`.
+For example:
 
-### Artist or rights information
+- Product code
+- Method
+- Design
+- Diameter
+- Support/material
+- Paint type
+- Difficulty
+- Packaging
 
-If exact attribution is supplied and useful, preserve it accurately in a restrained form near the end. Do not add rights claims, URLs or artist details that were not supplied.
+Do not use canvas-specific fields for a wood-slice product.
 
-## Image rules
+Do not create filler rows.
 
-Process the first `{{IMAGE_COUNT}}` images in the exact attachment order supplied above.
+Do not duplicate the same value under several labels.
+
+Use this styling:
+
+```html
+<div style="width:100%; overflow-x:auto; margin:0 0 18px;">
+  <table
+    style="width:100%; border-collapse:collapse; font-family:Open Sans, sans-serif; font-size:15px; line-height:1.6; color:#444; border:1px solid #ddd;"
+  >
+    <thead>
+      <tr>
+        <th
+          style="background:#76689A; color:#fff; text-align:left; padding:10px 12px; border:1px solid #76689A; font-weight:bold;"
+        >
+          Specification
+        </th>
+        <th
+          style="background:#76689A; color:#fff; text-align:left; padding:10px 12px; border:1px solid #76689A; font-weight:bold;"
+        >
+          Details
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      [verified product-specific rows]
+    </tbody>
+  </table>
+</div>
+```
+
+Row-label cells should follow this style:
+
+```html
+<th
+  scope="row"
+  style="text-align:left; padding:9px 12px; border:1px solid #ddd; background:#f7f4fb; color:#76689A; font-weight:bold;"
+></th>
+```
+
+Value cells:
+
+```html
+<td style="padding:9px 12px; border:1px solid #ddd;"></td>
+```
+
+---
+
+# Artist / artwork rights
+
+When exact artist or rights information is supplied in `product.md`, preserve it.
+
+Use the clearer format:
+
+```html
+<div style="margin:0 0 18px; font-size:0.95rem; color:#555;">
+  <strong>Artwork rights:</strong> Exclusive rights © [exact supplied name].
+</div>
+```
+
+Do not use an extra `<p>` solely for this note.
+
+Do not invent:
+
+- artist names
+- copyright owners
+- rights statements
+- dates
+- URLs
+
+---
+
+# Internal links
+
+Use only supplied links.
+
+Where one or two relevant destinations are supplied, prefer the established purple CTA buttons near the end.
+
+Primary CTA style:
+
+```html
+<a
+  href="[URL]"
+  title="[descriptive title]"
+  style="display:block; text-align:center; background:linear-gradient(135deg,#8B7CC8,#76689A); padding:12px 16px; border-radius:6px; color:#fff; text-decoration:none; margin-bottom:12px; font-weight:bold;"
+>
+  [CTA text]
+</a>
+```
+
+Secondary CTA may use:
+
+```text
+linear-gradient(315deg,#8B7CC8,#76689A)
+```
+
+Do not:
+
+- invent links
+- browse destinations
+- create a long list
+- insert unnecessary paragraphs just to contain links
+- use generic anchor text such as `Click Here`
+
+---
+
+# Copy quality rules
+
+The finished HTML should be comparable in usefulness to a carefully written ecommerce product page.
+
+Before finalising, ask internally:
+
+### Could the first two paragraphs be reused almost unchanged for another Figured'Art design?
+
+If yes, they are too generic. Rewrite them.
+
+### Does the H2 explain what the product actually is?
+
+If no, rewrite it.
+
+### Have specifications replaced useful customer-facing copy?
+
+If yes, move routine facts into the table and strengthen the paragraphs.
+
+### Does the page explain the visible artwork?
+
+If images clearly support more detail, use that detail.
+
+### Does it explain the paint-by-numbers workflow?
+
+If instructions are supplied, make the ordered list genuinely useful.
+
+### Does the page answer why someone would choose this design?
+
+Use the distinctive visible subject/style rather than generic claims.
+
+---
+
+# Avoid deteriorating/template-like copy
+
+Avoid repeated structures such as:
+
+> Create a [colour] scene featuring [subject]. This Figured'Art kit uses a 20 x 20cm canvas and has an easy difficulty level.
+
+Avoid making `difficulty level` a major selling sentence unless there is a product-specific reason.
+
+Avoid:
+
+> The kit includes paints and brushes. Once completed, it can be displayed.
+
+when substantially richer supplied information allows a better explanation.
+
+Instead combine the verified facts into natural buying context.
+
+Do not artificially lengthen the page.
+
+The goal is **specificity and usefulness**, not word count.
+
+---
+
+# Image metadata
+
+Process the first `{{IMAGE_COUNT}}` images in the exact attachment order.
+
+Do **not generate, recreate or modify any images**.
 
 For every processed GO b2b image return:
 
@@ -281,84 +819,153 @@ For every processed GO b2b image return:
 - `IMAGE_n_TITLE`
 - `IMAGE_n_ALT`
 
-### IMAGE_n_NAME
+## IMAGE_n_NAME
 
-Create a clean, human-readable CMS image name. It is not a filename or path and must not contain a file extension.
+Create a clean human-readable CMS image name.
 
-Start every image name with the verified Figured'Art product code from `product.md`.
+It must:
 
-Useful patterns include:
+- start with the verified Figured'Art product code from `product.md`
+- contain no file extension
+- identify the design
+- distinguish what the image actually shows
 
-- `SFA137-Y Santorini Sunrise Paint by Numbers Artwork`
-- `SFA137-Y Santorini Sunrise Kit Contents`
-- `RFA013 Lavender Wood Slice Paint by Numbers Design`
+Examples:
 
-Use a description such as `Kit Contents`, `Framed Canvas`, `Paint Pots`, `Brushes`, `Packaging`, `Reference Image`, `Wood Slice` or `Finished Artwork` only when that feature is genuinely visible.
+`SFA137-Y Santorini Sunrise Paint by Numbers Artwork`
 
-Make each image name distinct enough to identify multiple images for the same product.
+`SFA137-Y Santorini Sunrise Kit Contents`
 
-### IMAGE_n_TITLE
+`RFA013 Lavender Wood Slice Paint by Numbers Design`
 
-- Write concise, natural title text.
-- Match the visible image.
-- Include design and product type where useful.
-- Use size, framed state or kit-content wording only when supported and relevant to that image.
+Use terms such as:
+
+- Artwork
+- Kit Contents
+- Framed Canvas
+- Paint Pots
+- Brushes
+- Packaging
+- Reference Image
+- Wood Slice
+- Finished Design
+
+only when genuinely visible.
+
+## IMAGE_n_TITLE
+
+Create concise natural image title text.
+
+- Describe the visible image.
+- Include the design name.
+- Include product format where useful.
 - Do not force the SKU into every title.
+- Do not simply duplicate the image name.
 
-### IMAGE_n_ALT
+## IMAGE_n_ALT
 
-- Prioritise accessibility and describe what is actually visible.
-- Identify the artwork/design, product format and visible kit components naturally.
-- Keep concise.
-- Do not keyword-stuff.
-- Do not infer technical specifications from appearance.
-- Do not call something packaging, a framed canvas, a wood slice, paint pots, brushes, wall fixings or finished artwork unless it is genuinely visible.
+Write accessibility-first alt text describing the actual visible image.
 
-### Image distinctness
+Where useful describe:
 
-For every processed GO b2b image:
+- artwork subject
+- visible format
+- visible colours
+- kit components
+- frame
+- wood slice
+- numbered design
 
-- Name, Title and Alt must all be present.
-- Name, Title and Alt must be meaningfully distinct.
+Do not keyword-stuff.
+
+Do not add unsupported specifications.
+
+Do not call something:
+
+- packaging
+- canvas
+- framed
+- wood slice
+- paint pots
+- brushes
+- fixings
+- finished artwork
+
+unless genuinely visible.
+
+## Distinctness
+
+For every processed image:
+
+- Name must be present.
+- Title must be present.
+- Alt must be present.
+- All three must be meaningfully distinct.
 - Title and Alt must not be exact duplicates.
-- Do not create artificial variation by inventing details.
 
-## Attachment authority
+---
 
-There are `{{ATTACHMENT_IMAGE_COUNT}}` actual ChatGPT attachments. `IMAGE_COUNT` must still equal `{{IMAGE_COUNT}}`, because GO b2b accepts only the first `{{IMAGE_COUNT}}` image records.
+# Attachment authority — do not alter
 
-Use later attachments as product-reference context only. Do not return `IMAGE_n_NAME`, `IMAGE_n_TITLE` or `IMAGE_n_ALT` fields for an attachment numbered above `{{IMAGE_COUNT}}`.
+There are `{{ATTACHMENT_IMAGE_COUNT}}` actual ChatGPT attachments.
+
+`IMAGE_COUNT` must still equal `{{IMAGE_COUNT}}`, because GO b2b accepts only the first `{{IMAGE_COUNT}}` image records.
+
+Use later attachments as product-reference context only.
+
+Do not return `IMAGE_n_NAME`, `IMAGE_n_TITLE` or `IMAGE_n_ALT` for attachments numbered above `{{IMAGE_COUNT}}`.
 
 The attachment order is:
 
 {{IMAGE_ORDER}}
 
-Return image fields for exactly the first `{{IMAGE_COUNT}}` attachments. Do not use the Images list inside `product.md` or any reference-only attachment to change the output count, order, filenames or fields.
+Return image fields for exactly the first `{{IMAGE_COUNT}}` attachments.
 
-## Final QA
+Do not use an Images list inside `product.md` to change:
+
+- output count
+- order
+- filenames
+- fields
+
+---
+
+# Final QA
 
 Internally verify:
 
 - `PRODUCT_NAME` exactly echoes the GO b2b input.
 - `IMAGE_COUNT` is unchanged.
-- Product code and product type match `product.md`.
-- Canvas, frame and wood-slice terminology are not mixed up.
-- Size, contents, difficulty and materials are used only when supplied.
-- Instructions retain their full useful meaning.
-- Duplicate specifications are consolidated.
-- No supplier URL, citations, source tokens or editorial notes appear in CMS copy.
-- Metadata fits the requested limits where practical.
-- HTML has no `<h1>`, placeholder or code fence after parsing.
+- No image has been generated, edited or recreated.
+- Product code matches `product.md`.
+- Correct product type is used.
+- Canvas and wood-slice terminology are never mixed.
+- Framed state is used only when verified.
+- Size is used only when supplied.
+- Kit contents are exact.
+- Design-specific visual details come only from clear image evidence or supplied text.
+- H2 states what the product is rather than using a vague creative slogan.
+- First two paragraphs are specific to this design.
+- First two paragraphs contain useful buying information rather than mostly specifications.
+- How Does It Work is included when supplied.
+- What's Included is included when supplied.
+- Specification table contains only verified facts.
+- Artist/rights information is accurate where supplied.
+- No supplier URL appears in customer-facing copy.
+- No citations or source tokens appear in the HTML.
+- Metadata fits requested limits where practical.
 - Only supplied internal links are used.
-- Every `<a>` has a descriptive `title`.
+- Every `<a>` contains a descriptive `title`.
 - Each of the first `{{IMAGE_COUNT}}` attachments has Name, Title and Alt in exact order.
 - Every processed image Name starts with the verified product code.
 - Image Title and Alt are not identical.
 - No automation fields are missing, renamed, duplicated or reordered.
 
-## Automation output contract — do not alter
+---
 
-Return exactly one automation block and no text before or after it.
+# Automation output contract — DO NOT ALTER
+
+Return exactly one automation block and **no text before or after it**.
 
 Do not omit, rename, reorder or duplicate any field.
 
@@ -366,25 +973,34 @@ Do not omit, rename, reorder or duplicate any field.
 
 `IMAGE_COUNT` must be exactly `{{IMAGE_COUNT}}`.
 
-Put the complete multiline CMS HTML only inside `HTML_SNIPPET`. A single `html` code fence is allowed around that field's value.
+Put the complete multiline CMS HTML only inside `HTML_SNIPPET`.
+
+A single `html` code fence is allowed around that field's value.
 
 ===AUTOMATION_OUTPUT_START===
+
 MODE:
+
 FIGUREDART_PRODUCT_CREATION
 
 PRODUCT_NAME:
+
 {{PRODUCT_NAME}}
 
 IMAGE_COUNT:
+
 {{IMAGE_COUNT}}
 
 PRODUCT_NAME_RECOMMENDATION:
+
 [exact recommended product name, or KEEP CURRENT PRODUCT NAME]
 
 META_TITLE:
+
 [exact meta title only]
 
 META_DESCRIPTION:
+
 [exact meta description only]
 
 HTML_SNIPPET:

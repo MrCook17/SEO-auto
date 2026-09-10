@@ -118,6 +118,10 @@ global departmentAutomationActive := false
 global departmentStopAfterCurrent := false
 global LastEditButtons := []
 global LastDocument := 0
+global testingModeEnabled := false
+global testingSessionLogPath := ""
+global testingSessionId := ""
+global testingArtifactSequence := 0
 
 ; Public product/category URL for {PAGE_URL} in every ChatGPT prompt. All modes
 ; load the shared saved value from state\botz-prompt-settings.txt at startup.
@@ -150,10 +154,18 @@ imageTargets := [
 ]
 imageGalleryPageSize := 5
 imageGalleryMaxPages := 100
-imageGalleryNextPageDelayMs := 800
-imageGalleryPreviousPageDelayMs := 800
+imageGalleryNextPageDelayMs := 300
+imageGalleryPreviousPageDelayMs := 300
 imageGalleryPageChangeTimeoutMs := 5000
 imageGalleryFirstPageNoChangeTimeoutMs := 2000
+imageGalleryAvailabilityTimeoutMs := 15000
+imageGalleryCountTimeoutMs := 20000
+imageGalleryCountStableDurationMs := 2000
+; A later carousel page can remain absent from UIA indefinitely until it is
+; visited, so waiting longer on page 1 cannot reliably reveal image 11. The
+; detector now visits every available page and keeps the highest realised card
+; total; two seconds per page is enough to reject a transient partial render.
+imageGalleryMinimumObservationMs := 2000
 
 ; High-quality image copy settings.
 ; Process used for each image:
@@ -162,8 +174,9 @@ imageGalleryFirstPageNoChangeTimeoutMs := 2000
 ; Keep this enabled so ChatGPT receives the clearer image rather than the small thumbnail.
 copyHighQualityImagePreview := true
 highQualityImageCopyPoint := [635, 687] ; x: 635, y: 687
-highQualityImagePreviewLoadDelayMs := 700
-imageTabLoadDelayMs := 1500
+highQualityImagePreviewLoadDelayMs := 450
+imageCopyPreCopyDelayMs := 1000
+imageTabLoadDelayMs := 500
 
 ; false = do not silently fall back to the old low-quality thumbnail copy if
 ; the high-quality preview copy fails. Set to true only if you prefer an
@@ -176,7 +189,7 @@ allowThumbnailImageCopyFallback := false
 useRecommendedProductName := true
 
 ; Chrome/Edge image context menu shortcut. On many Windows Chrome installs, "y" triggers Copy image.
-; If the right-click fallback opens the wrong context menu item, change this to the shortcut that works on your browser.
+; This is the primary image-copy path. If it selects the wrong item, change the shortcut here.
 imageContextCopyKey := "y"
 
 ; ChatGPT paste reliability settings.
@@ -193,6 +206,18 @@ chatResponseInitialWaitMs := 120000
 chatResponsePollIntervalMs := 30000
 imageOnlyChatResponseInitialWaitMs := 60000
 imageOnlyChatResponsePollIntervalMs := 15000
+chatImageWindowWakeDelayMs := 250
+chatImageFocusDelayMs := 250
+chatImageAttachmentTimeoutMs := 5000
+chatImageAttachmentPollIntervalMs := 150
+chatImageAttachmentSettleMs := 400
+chatImagePasteFallbackDelayMs := 1000
+chatSubmitPreEnterDelayMs := 30000
+cmsImageDetailsButtonTimeoutMs := 5000
+cmsImageDetailsFormTimeoutMs := 5000
+cmsImageDetailsOpenAttempts := 2
+cmsImageGalleryReturnTimeoutMs := 7000
+cmsImageGalleryReturnSettleMs := 500
 
 ; Ctrl+Alt+A toggles this. Keep it off by default so Numpad4, NumpadEnter and
 ; Numpad6 retain their existing manual workflow until automation is requested.
@@ -251,6 +276,8 @@ requiredInternalLinksDefault := "N/A"
 additionalProductNotesDefault := "N/A"
 
 InitialiseSeoPromptSettings()
+OnError(LogUnhandledErrorForTesting)
+OnExit(LogTestingSessionExit)
 
 ; ==========================================================
 ; HOTKEYS
@@ -298,7 +325,7 @@ TestScript() {
     global useRecommendedProductName, SeoAutomationMode, imageCountToProcess
     global fullWorkflowAutomationEnabled, automaticWorkflowActive
     global departmentAutomationEnabled, departmentAutomationActive
-    global departmentStopAfterCurrent
+    global departmentStopAfterCurrent, testingModeEnabled, testingSessionLogPath
     nameMode := useRecommendedProductName ? "ON" : "OFF"
     automationMode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
     automationStatus := automaticWorkflowActive
@@ -308,6 +335,8 @@ TestScript() {
     departmentStatus := departmentAutomationActive
         ? (departmentStopAfterCurrent ? "stopping after current product" : "running")
         : "idle"
+    testingStatus := testingModeEnabled ? "ON" : "OFF"
+    testingLog := testingModeEnabled && testingSessionLogPath != "" ? testingSessionLogPath : "none"
     savedCount := 0
     savedMode := "none"
     try {
@@ -320,6 +349,8 @@ TestScript() {
         . "`nRecommended product-name insertion: " nameMode
         . "`nFull workflow automation (Ctrl+Alt+A): " automationMode " (" automationStatus ")"
         . "`nDepartment automation (Ctrl+Alt+D): " departmentMode " (" departmentStatus ")"
+        . "`nTesting diagnostics: " testingStatus
+        . "`nTesting session log: " testingLog
         . "`nDepartment start: Ctrl+Numpad4"
         . "`nDepartment stop after current product: Ctrl+Numpad6"
         . "`nUIA-v2 matrix support: available"
@@ -440,6 +471,7 @@ OpenProductBuildPromptAndPasteToChatGPT() {
             BuildPromptFromCurrentProductPage(pageUrl)
         RunAutomaticWorkflowIfEnabled(IsSupplierProductCreationMode())
     } catch as err {
+        ReportTestingError("open-product-workflow", err)
         MsgBox "OpenProductBuildPromptAndPasteToChatGPT failed:`n`n" err.Message
     }
 }
@@ -452,6 +484,7 @@ BuildPromptFromOpenProductPageAndPasteToChatGPT() {
     try {
         return RunOpenProductWorkflow(false)
     } catch as err {
+        ReportTestingError("open-current-product-workflow", err)
         MsgBox "BuildPromptFromOpenProductPageAndPasteToChatGPT failed:`n`n" err.Message
         return false
     }
@@ -497,6 +530,10 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     ClickPoint("overview_tab", 500)
     SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     productName := CopyFromPoint("product_name")
+    TestingLog(
+        "product-workflow-start",
+        "Product name=" productName "; mode=" GetSeoAutomationMode() "; page_url=" pageUrl "."
+    )
 
     ; Description tab: meta and HTML fields
     ClickPoint("description_tab", 600)
@@ -795,9 +832,74 @@ FocusChatGptInputForPaste() {
     Sleep 300
 }
 
-; Keep this wrapper because the image-paste code also uses it.
+; Backwards-compatible wrapper retained for older/manual callers.
 WakeChatGptInput() {
     FocusChatGptInputForPaste()
+}
+
+FocusChatGptInputForImagePaste() {
+    global chatImageFocusDelayMs
+
+    ; During an image batch ChatGPT is already awake and the draft already
+    ; exists, so one short focus click is sufficient. The slower two-click wake
+    ; sequence remains in place for the initial large prompt paste.
+    ClickPoint("chat_input", chatImageFocusDelayMs)
+    Sleep 100
+}
+
+GetChatGptDraftAttachmentCount() {
+    try {
+        document := UIA_Browser().GetCurrentDocumentElement()
+        buttons := document.FindElements({ Name: "Remove file", Type: "Button", mm: 2, cs: 0 })
+        count := 0
+        for _, button in buttons {
+            try {
+                if RegExMatch(Trim(button.Name), "i)^Remove file\s+\d+:")
+                    count += 1
+            }
+        }
+        return count
+    } catch as err {
+        TestingLog("chatgpt-attachment-count-error", FormatTestingError(err))
+        return -1
+    }
+}
+
+WaitForChatGptDraftAttachmentCount(expectedCount) {
+    global chatImageAttachmentTimeoutMs, chatImageAttachmentPollIntervalMs, chatImageAttachmentSettleMs
+
+    startedAt := A_TickCount
+    deadline := startedAt + chatImageAttachmentTimeoutMs
+    lastCount := -1
+    Loop {
+        count := GetChatGptDraftAttachmentCount()
+        if count != lastCount {
+            TestingLog(
+                "chatgpt-attachment-count",
+                "Expected=" expectedCount "; detected=" count "; elapsed_ms=" (A_TickCount - startedAt) "."
+            )
+            lastCount := count
+        }
+        if count >= expectedCount {
+            Sleep chatImageAttachmentSettleMs
+            confirmedCount := GetChatGptDraftAttachmentCount()
+            if confirmedCount >= expectedCount {
+                TestingLog(
+                    "chatgpt-attachment-ready",
+                    "Expected=" expectedCount "; detected=" confirmedCount "; elapsed_ms=" (A_TickCount - startedAt) "."
+                )
+                return true
+            }
+        }
+        if A_TickCount >= deadline {
+            TestingLog(
+                "chatgpt-attachment-timeout",
+                "Expected=" expectedCount "; last_detected=" lastCount "; timeout_ms=" chatImageAttachmentTimeoutMs "."
+            )
+            return false
+        }
+        Sleep chatImageAttachmentPollIntervalMs
+    }
 }
 
 PasteLargeTextToFocusedInput(text) {
@@ -889,18 +991,37 @@ SetClipboardText(text) {
 ; ==========================================================
 
 TryCopyCmsImagesToChatGPT(showResult := true) {
-    global imageCountToProcess
+    global imageCountToProcess, chatgptWinTitle, chatImageWindowWakeDelayMs
 
     try {
         if imageCountToProcess < 1
             return true
 
         successCount := 0
+        batchStartedAt := A_TickCount
+        TestingLog("chatgpt-image-batch-start", "Starting " imageCountToProcess " CMS image copy/paste attempt(s).")
+
+        ; The prompt can appear in ChatGPT as one draft file tile. Measure the
+        ; current draft first, then verify that each image adds exactly one more
+        ; attachment instead of waiting a long fixed delay after every Ctrl+V.
+        ActivateWindow(chatgptWinTitle, chatImageWindowWakeDelayMs)
+        attachmentBaseline := GetChatGptDraftAttachmentCount()
+        TestingLog("chatgpt-attachment-baseline", "Draft attachment count before CMS images: " attachmentBaseline ".")
+
+        ; Open and rewind the gallery once. Images are ordered left-to-right in
+        ; groups of five, so the batch can move forward only at images 6 and 11
+        ; instead of reopening page 1 for every individual image.
+        PrepareCmsImageGalleryForSequentialCopy()
 
         Loop imageCountToProcess {
-            if TryCopyCmsSingleImageToChatGPT(A_Index, false)
+            expectedAttachmentCount := attachmentBaseline >= 0 ? attachmentBaseline + successCount + 1 : -1
+            if TryCopyCmsSingleImageToChatGPT(A_Index, false, true, expectedAttachmentCount)
                 successCount += 1
-            Sleep 600
+            else {
+                TestingLog("chatgpt-image-batch-stopped", "Stopped after " successCount " successful image(s); image " A_Index " failed.")
+                break
+            }
+            Sleep 100
         }
 
         if showResult {
@@ -910,8 +1031,15 @@ TryCopyCmsImagesToChatGPT(showResult := true) {
                 Flash("Image paste attempted for " successCount " of " imageCountToProcess " image(s).")
         }
 
+        TestingLog(
+            "chatgpt-image-batch-complete",
+            "Successful attempts: " successCount " of " imageCountToProcess
+            . "; elapsed_ms=" (A_TickCount - batchStartedAt) "."
+        )
+        SaveTestingAccessibilityTree("chatgpt-after-" successCount "-of-" imageCountToProcess "-image-pastes")
         return successCount = imageCountToProcess
     } catch as err {
+        ReportTestingError("chatgpt-image-batch", err)
         if showResult
             MsgBox "TryCopyCmsImagesToChatGPT failed:`n`n" err.Message
         return false
@@ -923,48 +1051,93 @@ TryCopyCmsImageToChatGPT(showResult := true) {
     return TryCopyCmsSingleImageToChatGPT(1, showResult)
 }
 
-TryCopyCmsSingleImageToChatGPT(imageIndex := 1, showResult := true) {
-    global chatgptWinTitle
+TryCopyCmsSingleImageToChatGPT(imageIndex := 1, showResult := true, sequentialGallery := false, expectedChatAttachmentCount := -1) {
+    global chatgptWinTitle, imageGalleryPageSize
+    global chatImageWindowWakeDelayMs, chatImagePasteFallbackDelayMs
 
     try {
-        imageCopied := CopyCmsImageToClipboard(imageIndex)
+        imageStartedAt := A_TickCount
+        TestingLog(
+            "chatgpt-image-start",
+            "Image " imageIndex "; gallery_page=" GetImageGalleryPageForIndex(imageIndex)
+            . "; gallery_slot=" (Mod(imageIndex - 1, imageGalleryPageSize) + 1) "."
+        )
+        imageCopied := CopyCmsImageToClipboard(imageIndex, sequentialGallery)
 
         if !imageCopied {
+            TestingLog("chatgpt-image-copy-failed", "Image " imageIndex " did not reach the clipboard.")
             if showResult
                 Flash("Image " imageIndex " copy failed. Attach manually.")
             return false
         }
 
-        ActivateWindow(chatgptWinTitle, 700)
-        WakeChatGptInput()
+        ActivateWindow(chatgptWinTitle, chatImageWindowWakeDelayMs)
+        FocusChatGptInputForImagePaste()
         Send "^v"
-        Sleep 1700
+        if expectedChatAttachmentCount >= 0 {
+            if !WaitForChatGptDraftAttachmentCount(expectedChatAttachmentCount) {
+                TestingLog(
+                    "chatgpt-image-paste-unverified",
+                    "Image " imageIndex " did not raise the draft attachment count to " expectedChatAttachmentCount "."
+                )
+                return false
+            }
+        } else
+            Sleep chatImagePasteFallbackDelayMs
+        TestingLog(
+            "chatgpt-image-paste",
+            "Image " imageIndex " was copied and verified in ChatGPT; elapsed_ms=" (A_TickCount - imageStartedAt) "."
+        )
 
         if showResult
             Flash("Image " imageIndex " paste attempted.")
 
         return true
     } catch as err {
+        ReportTestingError("chatgpt-image-" imageIndex, err)
         if showResult
             MsgBox "TryCopyCmsSingleImageToChatGPT failed for image " imageIndex ":`n`n" err.Message
         return false
     }
 }
 
-CopyCmsImageToClipboard(imageIndex := 1) {
+PrepareCmsImageGalleryForSequentialCopy() {
+    global cmsWinTitle
+
+    startedAt := A_TickCount
+    ActivateWindow(cmsWinTitle, 100)
+    OpenFirstImageGalleryPage()
+    TestingLog(
+        "image-gallery-sequential-ready",
+        "Gallery prepared on page 1 for sequential image copying; elapsed_ms=" (A_TickCount - startedAt) "."
+    )
+}
+
+CopyCmsImageToClipboard(imageIndex := 1, sequentialGallery := false) {
     global cmsWinTitle, imageContextCopyKey, copyHighQualityImagePreview, allowThumbnailImageCopyFallback
+    global imageGalleryPageSize, imageCopyPreCopyDelayMs
 
-    ActivateWindow(cmsWinTitle)
-    OpenImageGalleryPageForIndex(imageIndex)
+    ActivateWindow(cmsWinTitle, sequentialGallery ? 100 : 300)
+    if sequentialGallery {
+        if imageIndex > 1 && Mod(imageIndex - 1, imageGalleryPageSize) = 0 {
+            targetPage := GetImageGalleryPageForIndex(imageIndex)
+            TestingLog("image-gallery-sequential-advance", "Advancing to page " targetPage " for image " imageIndex ".")
+            if !TryAdvanceImageGalleryPage()
+                throw Error("Could not advance the sequential Image Gallery batch to page " targetPage " for image " imageIndex ".")
+        }
+    } else
+        OpenImageGalleryPageForIndex(imageIndex)
 
-    ; Preferred method: click the configured image thumbnail/card, then copy
-    ; the larger/high-quality preview image from highQualityImageCopyPoint.
+    ; Give the selected carousel page and its image resource one final second
+    ; to settle before opening/copying the preview. This is deliberately applied
+    ; to every image, including images that do not cross a page boundary.
+    TestingLog("image-copy-pre-delay", "Image " imageIndex "; delay_ms=" imageCopyPreCopyDelayMs ".")
+    Sleep imageCopyPreCopyDelayMs
+
+    ; The testing trace showed that Ctrl+C on the high-quality preview failed
+    ; for every image, while the context-menu Copy image shortcut succeeded for
+    ; every image. Use that successful route directly.
     if copyHighQualityImagePreview {
-        if CopyHighQualityPreviewByCtrlC(imageIndex)
-            return true
-
-        ; Browser fallback for the high-quality preview: right-click the
-        ; larger preview and use Chrome's Copy image shortcut.
         if CopyHighQualityPreviewByContextMenuKey(imageIndex, imageContextCopyKey)
             return true
 
@@ -974,37 +1147,11 @@ CopyCmsImageToClipboard(imageIndex := 1) {
             return false
     }
 
-    ; Optional legacy fallback methods. These preserve the old thumbnail copy
-    ; behaviour only when allowThumbnailImageCopyFallback is true.
-    if CopyImageByCtrlC(imageIndex)
-        return true
-
-    ; On many Chrome installs, the shortcut is "y". If this does not work,
-    ; test the context menu manually and change imageContextCopyKey near the top.
+    ; The optional thumbnail fallback also uses the proven context-menu route;
+    ; there is deliberately no preliminary Ctrl+C attempt anywhere in this flow.
     if CopyImageByContextMenuKey(imageIndex, imageContextCopyKey)
         return true
 
-    return false
-}
-
-CopyHighQualityPreviewByCtrlC(imageIndex := 1) {
-    global highQualityImageCopyPoint, highQualityImagePreviewLoadDelayMs
-
-    savedClip := ClipboardAll()
-    A_Clipboard := ""
-    Sleep 100
-
-    SelectCmsImageForPreview(imageIndex)
-    Sleep highQualityImagePreviewLoadDelayMs
-
-    ClickCoordinates(highQualityImageCopyPoint, 300)
-    Send "^c"
-
-    if ClipWait(2, true) {
-        return true
-    }
-
-    A_Clipboard := savedClip
     return false
 }
 
@@ -1019,15 +1166,17 @@ CopyHighQualityPreviewByContextMenuKey(imageIndex, copyKey) {
     Sleep highQualityImagePreviewLoadDelayMs
 
     MouseMove highQualityImageCopyPoint[1], highQualityImageCopyPoint[2]
-    Sleep 150
+    Sleep 100
     Click "Right"
-    Sleep 500
+    Sleep 300
     Send copyKey
 
     if ClipWait(3, true) {
+        TestingLog("image-clipboard-copy", "Image " imageIndex " copied from the high-quality preview with the context-menu shortcut.")
         return true
     }
 
+    TestingLog("image-clipboard-copy-miss", "Image " imageIndex " high-quality context-menu attempt did not produce clipboard data.")
     Send "{Esc}"
     A_Clipboard := savedClip
     return false
@@ -1035,24 +1184,7 @@ CopyHighQualityPreviewByContextMenuKey(imageIndex, copyKey) {
 
 SelectCmsImageForPreview(imageIndex := 1) {
     target := GetImageTarget(imageIndex)
-    ClickCoordinates(target["image"], 500)
-}
-
-CopyImageByCtrlC(imageIndex := 1) {
-    savedClip := ClipboardAll()
-    A_Clipboard := ""
-    Sleep 100
-
-    target := GetImageTarget(imageIndex)
     ClickCoordinates(target["image"], 300)
-    Send "^c"
-
-    if ClipWait(2, true) {
-        return true
-    }
-
-    A_Clipboard := savedClip
-    return false
 }
 
 CopyImageByContextMenuKey(imageIndex, copyKey) {
@@ -1063,9 +1195,9 @@ CopyImageByContextMenuKey(imageIndex, copyKey) {
     target := GetImageTarget(imageIndex)
     point := target["image"]
     MouseMove point[1], point[2]
-    Sleep 150
+    Sleep 100
     Click "Right"
-    Sleep 500
+    Sleep 300
     Send copyKey
 
     if ClipWait(3, true) {
@@ -1100,13 +1232,58 @@ OpenFirstImageGalleryPage() {
     global imageTabLoadDelayMs, imageGalleryMaxPages
 
     ; GO b2b preserves the current gallery page when the Images tab is clicked.
-    ; Walk backwards explicitly until Previous no longer changes the page.
+    ; Wait adaptively for the tab's UIA subtree before attempting pagination,
+    ; then walk backwards until Previous no longer changes the page.
     ClickPoint("images_tab", imageTabLoadDelayMs)
+    WaitForImageGalleryAvailable()
     Loop imageGalleryMaxPages {
         if !TryReturnToPreviousImageGalleryPage()
             return
         if A_Index = imageGalleryMaxPages
             throw Error("Could not return to the first Image Gallery page within the " imageGalleryMaxPages "-page safety limit.")
+    }
+}
+
+WaitForImageGalleryAvailable(timeoutMs := 0) {
+    global LastDocument, imageGalleryAvailabilityTimeoutMs
+
+    effectiveTimeoutMs := timeoutMs > 0 ? timeoutMs : imageGalleryAvailabilityTimeoutMs
+    startedAt := A_TickCount
+    deadline := startedAt + effectiveTimeoutMs
+    attempt := 0
+    lastProblem := "Image Gallery has not appeared yet."
+
+    Loop {
+        attempt += 1
+        ToolTip "Waiting for the Images tab accessibility tree..."
+        try {
+            document := UIA_Browser().GetCurrentDocumentElement()
+            LastDocument := document
+            gallery := FindImageGalleryScope(document)
+            if gallery {
+                TestingLog(
+                    "image-gallery-available",
+                    "UIA gallery became available after " (A_TickCount - startedAt) " ms on attempt " attempt "."
+                )
+                ToolTip()
+                return gallery
+            }
+            lastProblem := "The browser document was available, but the Image Gallery scope was absent."
+        } catch as err {
+            lastProblem := FormatTestingError(err)
+        }
+
+        if A_TickCount >= deadline {
+            ToolTip()
+            TestingLog("image-gallery-availability-timeout", lastProblem)
+            SaveTestingAccessibilityTree("image-gallery-availability-timeout")
+            throw Error(
+                "The Images tab accessibility tree did not become available within " effectiveTimeoutMs " ms."
+                . "`n`nLast UIA result: " lastProblem
+                . "`n`nLeave the Images tab open and press F9 to dump the tree."
+            )
+        }
+        Sleep 250
     }
 }
 
@@ -1150,26 +1327,63 @@ TryMoveImageGalleryPage(buttonCoordinateName, directionLabel, clickDelayMs, noCh
     if !gallery
         throw Error("The Image Gallery scope was unavailable before clicking its " directionLabel " button.")
     previousSnapshot := GetImageGalleryPageSnapshot(gallery)
-    buttonState := GetImageGalleryButtonState(buttonCoordinateName)
-    if buttonState = 0
+    buttonState := GetImageGalleryButtonState(buttonCoordinateName, gallery, directionLabel)
+    TestingLog(
+        "image-gallery-page-move",
+        "Direction=" directionLabel "; button_state=" buttonState "; before_snapshot_chars=" StrLen(previousSnapshot) "."
+    )
+    if buttonState = 0 {
+        TestingLog("image-gallery-page-edge", directionLabel " button is disabled.")
         return false
+    }
 
     ClickPoint(buttonCoordinateName, clickDelayMs)
-    if WaitForImageGalleryPageChange(previousSnapshot, noChangeTimeoutMs)
+    if WaitForImageGalleryPageChange(previousSnapshot, noChangeTimeoutMs) {
+        TestingLog("image-gallery-page-changed", directionLabel " navigation succeeded on its first click.")
         return true
+    }
 
     ; Retry once when UIA identified an enabled control. This handles a click
     ; landing during a brief gallery rerender without mistaking it for an edge.
     if buttonState = 1 {
         ClickPoint(buttonCoordinateName, clickDelayMs)
-        if WaitForImageGalleryPageChange(previousSnapshot, noChangeTimeoutMs)
+        if WaitForImageGalleryPageChange(previousSnapshot, noChangeTimeoutMs) {
+            TestingLog("image-gallery-page-changed", directionLabel " navigation succeeded on its retry click.")
             return true
+        }
     }
+    TestingLog("image-gallery-page-unchanged", directionLabel " navigation did not change the gallery snapshot.")
     return false
 }
 
-GetImageGalleryButtonState(buttonCoordinateName) {
+GetImageGalleryButtonState(buttonCoordinateName, gallery := 0, directionLabel := "") {
     global coords
+
+    ; Chrome omits Previous on page 1 and Next on the last page. A scoped UIA
+    ; lookup can identify those edges immediately, avoiding the old click plus
+    ; two-second no-change timeout on every image.
+    if gallery && directionLabel != "" {
+        try {
+            requestedButtons := gallery.FindElements({ Name: directionLabel, Type: "Button", mm: 2, cs: 0 })
+            for _, button in requestedButtons {
+                if StrLower(Trim(button.Name)) = StrLower(directionLabel)
+                    return button.IsEnabled ? 1 : 0
+            }
+
+            oppositeLabel := StrLower(directionLabel) = "previous" ? "Next" : "Previous"
+            oppositeButtons := gallery.FindElements({ Name: oppositeLabel, Type: "Button", mm: 2, cs: 0 })
+            for _, button in oppositeButtons {
+                if StrLower(Trim(button.Name)) = StrLower(oppositeLabel)
+                    return 0
+            }
+
+            if CountImageGalleryCards(gallery) <= 5
+                return 0
+        }
+    }
+
+    ; If the scoped tree is temporarily incomplete, retain the point-based
+    ; fallback and page-change verification used by older runs.
     point := coords[buttonCoordinateName]
 
     try node := UIA.SmallestElementFromPoint(point[1], point[2])
@@ -1247,35 +1461,86 @@ ValidateImageTargetConfig() {
         throw Error("The Image Gallery Previous and Next button coordinates must both be configured.")
 }
 
-; Opens the Images tab and updates imageCountToProcess from one stable
-; accessibility-tree scan. GO b2b exposes all gallery cards to UIA, including
-; cards on later five-image visual pages, so scanning and summing each page
-; would count the same cards repeatedly. Each genuine card has one exact-name
-; Remove button, which also remains correct when visible image labels skip.
+; Opens the Images tab and updates imageCountToProcess after visiting each
+; available five-image carousel page. GO b2b lazily realises later pages in the
+; accessibility tree: 002104 exposed only ten cards until its third page was
+; visited. Already-realised pages remain in the tree, so take the highest total
+; observed rather than summing page counts and double-counting retained cards.
+; Each genuine card has one exact-name Remove button, which remains reliable
+; even when visible image labels skip.
 DetectAndSetImageCountFromImagesTab(expectedCount := -1) {
     global imageCountToProcess, maximumImagesPerProduct
 
     ValidateImageTargetConfig()
     OpenFirstImageGalleryPage()
-    actualCount := WaitForStableImageGalleryCount()
+    actualCount := DiscoverStableImageGalleryCountAcrossPages()
     detectedCount := Min(actualCount, maximumImagesPerProduct)
 
     if expectedCount >= 0 && detectedCount != expectedCount
         throw Error("Image count changed or differs between matrix children: expected " expectedCount ", detected " detectedCount ".")
 
     imageCountToProcess := detectedCount
-    message := "UIA-v2 detected " actualCount " total Image Gallery card(s) in one stable scan, including cards on later visual pages."
+    message := "UIA-v2 detected " actualCount " total Image Gallery card(s) after realising and checking every available carousel page."
     if actualCount > maximumImagesPerProduct
         message .= " Only the first " maximumImagesPerProduct " will be processed because GO b2b permits at most " maximumImagesPerProduct " image records per product."
     LogText("image-count-detected", message)
+    TestingLog("image-count-accepted", message " Prompt/CMS count is " detectedCount ".")
+    SaveTestingAccessibilityTree("image-count-accepted-" detectedCount)
     return detectedCount
 }
 
-WaitForStableImageGalleryCount(timeoutMs := 7000, stableDurationMs := 750) {
-    global LastDocument
-    deadline := A_TickCount + timeoutMs
-    previousCount := -1
+DiscoverStableImageGalleryCountAcrossPages() {
+    global imageGalleryMaxPages, maximumImagesPerProduct
+
+    highestCount := -1
+    pageNumber := 1
+    Loop imageGalleryMaxPages {
+        currentCount := WaitForStableImageGalleryCount()
+        highestCount := Max(highestCount, currentCount)
+        TestingLog(
+            "image-count-page-observed",
+            "Carousel page=" pageNumber "; current_realised_total=" currentCount
+            . "; highest_realised_total=" highestCount "."
+        )
+
+        ; No further traversal is useful once the CMS processing limit has been
+        ; found, even if the source product somehow contains more records.
+        if highestCount >= maximumImagesPerProduct {
+            TestingLog(
+                "image-count-page-scan-complete",
+                "Stopped after page " pageNumber " because the " maximumImagesPerProduct "-image processing limit was realised."
+            )
+            return highestCount
+        }
+
+        if A_Index = imageGalleryMaxPages
+            throw Error("Image Gallery page discovery reached its " imageGalleryMaxPages "-page safety limit.")
+
+        if !TryAdvanceImageGalleryPage() {
+            TestingLog(
+                "image-count-page-scan-complete",
+                "Reached the final carousel page " pageNumber "; accepted highest realised total " highestCount "."
+            )
+            return highestCount
+        }
+        pageNumber += 1
+    }
+}
+
+WaitForStableImageGalleryCount(timeoutMs := 0, stableDurationMs := 0, minimumObservationMs := -1) {
+    global LastDocument, maximumImagesPerProduct
+    global imageGalleryCountTimeoutMs, imageGalleryCountStableDurationMs, imageGalleryMinimumObservationMs
+
+    effectiveTimeoutMs := timeoutMs > 0 ? timeoutMs : imageGalleryCountTimeoutMs
+    effectiveStableDurationMs := stableDurationMs > 0 ? stableDurationMs : imageGalleryCountStableDurationMs
+    effectiveMinimumObservationMs := minimumObservationMs >= 0 ? minimumObservationMs : imageGalleryMinimumObservationMs
+    startedAt := A_TickCount
+    deadline := startedAt + effectiveTimeoutMs
+    previousSignature := ""
     stableSince := 0
+    sampleNumber := 0
+    lastCounts := Map("remove", -1, "details", -1, "sizeOptions", -1, "images", -1)
+    lastProblem := "No complete Image Gallery sample was available."
 
     Loop {
         ToolTip "Reading Image Gallery accessibility tree..."
@@ -1284,26 +1549,77 @@ WaitForStableImageGalleryCount(timeoutMs := 7000, stableDurationMs := 750) {
             LastDocument := document
             gallery := FindImageGalleryScope(document)
             if gallery {
-                count := CountImageGalleryCards(gallery)
-                if count = previousCount {
-                    if !stableSince
-                        stableSince := A_TickCount
-                    if A_TickCount - stableSince >= stableDurationMs {
+                sampleNumber += 1
+                counts := GetImageGalleryCardControlCounts(gallery)
+                lastCounts := counts
+                signature := BuildImageGalleryCountSignature(counts)
+                consistent := AreImageGalleryCardControlCountsConsistent(counts)
+                now := A_TickCount
+
+                if signature != previousSignature {
+                    previousSignature := signature
+                    stableSince := now
+                    SaveTestingElementDump(
+                        gallery,
+                        "image-count-sample-" sampleNumber "-" signature
+                    )
+                }
+
+                TestingLog(
+                    "image-count-sample",
+                    "Sample " sampleNumber
+                    . "; elapsed_ms=" (now - startedAt)
+                    . "; " signature
+                    . "; consistent=" (consistent ? "yes" : "no")
+                    . "; stable_ms=" (now - stableSince)
+                )
+
+                if consistent {
+                    lastProblem := "The count was consistent but had not completed the minimum observation and stability periods."
+                    ; Once the GO b2b processing cap is present, no later card
+                    ; can increase the work this run is allowed to perform.
+                    minimumWaitSatisfied := counts["remove"] >= maximumImagesPerProduct
+                        || now - startedAt >= effectiveMinimumObservationMs
+                    if minimumWaitSatisfied
+                        && now - stableSince >= effectiveStableDurationMs {
                         ToolTip()
-                        return count
+                        TestingLog(
+                            "image-count-stable",
+                            "Accepted " counts["remove"] " card(s) after " (now - startedAt)
+                            . " ms; stable for " (now - stableSince) " ms; " signature "."
+                        )
+                        return counts["remove"]
                     }
                 } else {
-                    previousCount := count
-                    stableSince := A_TickCount
+                    lastProblem := "Per-card accessibility controls disagreed: " signature "."
                 }
+            } else {
+                previousSignature := ""
+                stableSince := 0
+                lastProblem := "The Image Gallery scope temporarily disappeared during rendering."
             }
-        } catch {
+        } catch as err {
             ; Chrome can briefly invalidate UIA elements while the tab renders.
             ; Retry until the overall deadline instead of accepting a bad count.
+            previousSignature := ""
+            stableSince := 0
+            lastProblem := FormatTestingError(err)
+            TestingLog("image-count-sample-error", lastProblem)
         }
         if A_TickCount >= deadline {
             ToolTip()
-            throw Error("The Image Gallery did not become available in the accessibility tree within " timeoutMs " ms. Leave the Images tab open and press F9 to dump the tree.")
+            finalSignature := BuildImageGalleryCountSignature(lastCounts)
+            TestingLog(
+                "image-count-timeout",
+                "Timed out after " effectiveTimeoutMs " ms. Last counts: " finalSignature ". Last result: " lastProblem
+            )
+            SaveTestingAccessibilityTree("image-count-timeout")
+            throw Error(
+                "The Image Gallery card count did not become complete and stable within " effectiveTimeoutMs " ms."
+                . "`n`nLast counts: " finalSignature
+                . "`nLast UIA result: " lastProblem
+                . "`n`nLeave the Images tab open and press F9 to dump the tree."
+            )
         }
         Sleep 250
     }
@@ -1338,21 +1654,52 @@ FindImageGalleryScope(document) {
 }
 
 CountImageGalleryCards(scope) {
+    return GetImageGalleryCardControlCounts(scope)["remove"]
+}
+
+GetImageGalleryCardControlCounts(scope) {
+    return Map(
+        "remove", CountExactImageGalleryElements(scope, "Remove", "Button"),
+        "details", CountExactImageGalleryElements(scope, "Details", "Button"),
+        "sizeOptions", CountExactImageGalleryElements(scope, "Size Options", "Button"),
+        "images", CountExactImageGalleryElements(scope, "", "Image")
+    )
+}
+
+CountExactImageGalleryElements(scope, expectedName, typeName) {
     count := 0
-    try elements := scope.FindElements({ Name: "Remove", mm: 2, cs: 0 })
+    ; UIA's Image control type is localised by Chrome as "graphic".
+    expectedLocalizedType := StrLower(typeName) = "image" ? "graphic" : StrLower(typeName)
+    condition := expectedName = ""
+        ? { Type: typeName }
+        : { Name: expectedName, Type: typeName, mm: 2, cs: 0 }
+    try elements := scope.FindElements(condition)
     catch
         return count
 
     for _, element in elements {
         try {
-            if StrLower(Trim(element.Name)) != "remove"
+            if expectedName != "" && StrLower(Trim(element.Name)) != StrLower(expectedName)
                 continue
-            if StrLower(GetUiaControlTypeText(element)) != "button"
+            if StrLower(GetUiaControlTypeText(element)) != expectedLocalizedType
                 continue
             count += 1
         }
     }
     return count
+}
+
+AreImageGalleryCardControlCountsConsistent(counts) {
+    return counts["remove"] = counts["details"]
+    && counts["remove"] = counts["sizeOptions"]
+    && counts["remove"] = counts["images"]
+}
+
+BuildImageGalleryCountSignature(counts) {
+    return "remove=" counts["remove"]
+    . ", details=" counts["details"]
+    . ", size_options=" counts["sizeOptions"]
+    . ", images=" counts["images"]
 }
 
 ; ==========================================================
@@ -1436,6 +1783,13 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
         imageTitles := output["imageTitles"]
         imageAlts := output["imageAlts"]
         imageNames := output["imageNames"]
+        TestingLog(
+            "chatgpt-output-parsed",
+            "Expected image count=" imageCountToProcess
+            . "; parsed names=" imageNames.Length
+            . "; parsed titles=" imageTitles.Length
+            . "; parsed alts=" imageAlts.Length "."
+        )
 
         LogText("chatgpt-output", response)
         LogText("automation-block", block)
@@ -1489,6 +1843,7 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
             Flash("SEO fields pasted; main product was not saved.")
         return true
     } catch as err {
+        ReportTestingError("paste-chatgpt-output-to-cms", err)
         MsgBox "PasteCopiedChatGPTOutputToCms failed:`n`n" err.Message
         return false
     }
@@ -1552,13 +1907,26 @@ AutomaticWorkflowControlHint() {
 }
 
 SubmitChatGptDraftForAutomaticWorkflow(forceAutomation := false) {
-    global chatgptWinTitle
-    ToolTip AutomaticWorkflowStatusHeading() "`nSubmitting the prepared ChatGPT request..."
-    ActivateWindow(chatgptWinTitle, 300)
-    FocusChatGptInputForPaste()
+    global chatgptWinTitle, chatImageWindowWakeDelayMs, chatSubmitPreEnterDelayMs
+    ToolTip AutomaticWorkflowStatusHeading()
+        . "`nWaiting " Round(chatSubmitPreEnterDelayMs / 1000, 1) " seconds before submitting the prepared ChatGPT request..."
+    ActivateWindow(chatgptWinTitle, chatImageWindowWakeDelayMs)
+    ; The prompt and any images were just pasted into this existing draft, so
+    ; keep it untouched for a full ten seconds before the final Enter. This lets
+    ; ChatGPT finish materialising large prompts and draft attachments.
+    FocusChatGptInputForImagePaste()
     if !AutomaticWorkflowMayContinue(forceAutomation)
         return false
-    LogText("chatgpt-auto-submit", "Pressing Enter to start the automatic ChatGPT round trip.")
+    TestingLog("chatgpt-pre-submit-wait", "Delay_ms=" chatSubmitPreEnterDelayMs "; workflow=automatic.")
+    Sleep chatSubmitPreEnterDelayMs
+    if !AutomaticWorkflowMayContinue(forceAutomation)
+        return false
+    ; Re-focus after the wait in case Chrome moved focus while rendering.
+    FocusChatGptInputForImagePaste()
+    LogText(
+        "chatgpt-auto-submit",
+        "Pressing Enter after a " Round(chatSubmitPreEnterDelayMs / 1000, 1) "-second draft-settle wait."
+    )
     Send "{Enter}"
     Sleep 300
     return true
@@ -1739,6 +2107,7 @@ StartDepartmentAutomation() {
             currentIdentity := OpenAndVerifyNextDepartmentProduct(nextResult["product"], completedCount + 1)
         }
     } catch as err {
+        ReportTestingError("department-automation", err)
         MsgBox "Department automation stopped.`n`nProducts completed: " completedCount "`n`n" err.Message
         return false
     } finally {
@@ -1848,16 +2217,30 @@ CollectDepartmentCatalogueProducts(document, departmentProductType := "") {
     for _, listItem in listItems {
         if !InStr(StrLower(listItem.ClassName), "cms-catalogue-tile")
             continue
-        identity := ParseDepartmentCatalogueTileIdentity(listItem.Name)
+        rowText := listItem.Name
+        rowProductType := GetCatalogueTileProductTypePrefix(rowText)
+        ; Filter the broad product class before attempting to parse its full
+        ; identity. Reference-only Matrix SKU tiles deliberately have no Edit
+        ; suffix/control, but matrix department runs only need Matrix Product
+        ; parents and must not abort when these non-target rows are present.
+        if departmentProductType != ""
+            && rowProductType != ""
+            && StrLower(rowProductType) != StrLower(departmentProductType) {
+            if IsCatalogueReferenceMatrixSkuTile(rowText)
+                TestingLog("catalogue-reference-sku-skipped", NormaliseCatalogueTileText(rowText))
+            continue
+        }
+
+        identity := ParseDepartmentCatalogueTileIdentity(rowText)
         if !identity {
             ; A catalogue list can contain links to child departments alongside
             ; its actual products. They use the same cms-catalogue-tile class,
             ; but must not participate in product ordering or next-product
             ; selection. BOTZ lists did not expose these structural rows, which
             ; is why the same department loop worked there.
-            if IsCatalogueDepartmentTile(listItem.Name)
+            if IsCatalogueDepartmentTile(rowText)
                 continue
-            throw Error("A catalogue product tile could not be parsed safely: " listItem.Name)
+            throw Error("A catalogue product tile could not be parsed safely: " rowText)
         }
         ; Department runs operate on one product class only. Matrix modes use
         ; Matrix Product parents; ordinary and BOTZ modes use Simple Products.
@@ -1875,15 +2258,30 @@ CollectDepartmentCatalogueProducts(document, departmentProductType := "") {
     return products
 }
 
-IsCatalogueDepartmentTile(rowText) {
+NormaliseCatalogueTileText(rowText) {
     text := RegExReplace(rowText, "[\x{E000}-\x{F8FF}]", " ")
-    text := RegExReplace(Trim(text), "[\r\n\t ]+", " ")
+    return RegExReplace(Trim(text), "[\r\n\t ]+", " ")
+}
+
+GetCatalogueTileProductTypePrefix(rowText) {
+    text := NormaliseCatalogueTileText(rowText)
+    if RegExMatch(text, "i)^(Simple Product|Matrix SKU|Matrix Product)\b", &match)
+        return match[1]
+    return ""
+}
+
+IsCatalogueReferenceMatrixSkuTile(rowText) {
+    text := NormaliseCatalogueTileText(rowText)
+    return RegExMatch(text, "i)^Matrix SKU\s+(?:\(Reference\)|Reference)\b")
+}
+
+IsCatalogueDepartmentTile(rowText) {
+    text := NormaliseCatalogueTileText(rowText)
     return RegExMatch(text, "i)^Department\s+.+\s+Edit$")
 }
 
 ParseDepartmentCatalogueTileIdentity(rowText) {
-    text := RegExReplace(rowText, "[\x{E000}-\x{F8FF}]", " ")
-    text := RegExReplace(Trim(text), "[\r\n\t ]+", " ")
+    text := NormaliseCatalogueTileText(rowText)
     if !RegExMatch(text, "i)^(Simple Product|Matrix SKU|Matrix Product)\s+(.+?)\s+Edit$", &match)
         return 0
 
@@ -2504,6 +2902,8 @@ InsertImageSeoFields(imageTitles, imageAlts, imageNames := 0) {
         imageName := imageNames && imageNames.Length >= A_Index ? imageNames[A_Index] : ""
         PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index], imageName)
     }
+    if imageTitles.Length
+        SaveTestingAccessibilityTree("cms-after-" imageTitles.Length "-image-metadata-records")
 }
 
 ; ==========================================================
@@ -2511,30 +2911,41 @@ InsertImageSeoFields(imageTitles, imageAlts, imageNames := 0) {
 ; ==========================================================
 
 BeginSequentialImageMetadataInsertion(imageCount) {
-    global imageGalleryPageSize, imageGalleryPreviousPageDelayMs, imageTabLoadDelayMs
-
     if imageCount < 1
         return
 
-    ; Do not inspect UIA while entering tags. The gallery retains its last page,
-    ; so click Previous enough times to guarantee page 1 for this image count.
-    ClickPoint("images_tab", imageTabLoadDelayMs)
-    pagesToRewind := Ceil(imageCount / imageGalleryPageSize) - 1
-    if pagesToRewind > 0 {
-        Loop pagesToRewind
-            ClickPoint("image_gallery_previous_button", imageGalleryPreviousPageDelayMs)
-    }
+    ; Use verified UIA page changes here as well as during image copying. Blind
+    ; Previous clicks could leave the metadata run on the wrong carousel page.
+    OpenFirstImageGalleryPage()
+    TestingLog(
+        "cms-image-metadata-start",
+        "Image count=" imageCount "; gallery page 1 was verified through UIA."
+    )
 }
 
 PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt, imageName := "") {
-    global imageGalleryPageSize, imageGalleryNextPageDelayMs
-    target := GetImageTarget(imageIndex)
+    global imageGalleryPageSize
 
     ; Image cards are ordered left-to-right in groups of five. Image 6, 11,
     ; 16, etc. moves to the next page and reuses the first configured slot.
-    if imageIndex > 1 && Mod(imageIndex - 1, imageGalleryPageSize) = 0
-        ClickPoint("image_gallery_next_button", imageGalleryNextPageDelayMs)
-    ClickCoordinates(target["details_button"], 1000)
+    if imageIndex > 1 && Mod(imageIndex - 1, imageGalleryPageSize) = 0 {
+        TestingLog(
+            "cms-image-page-advance",
+            "Advancing to gallery page " GetImageGalleryPageForIndex(imageIndex) " for image " imageIndex "."
+        )
+        if !TryAdvanceImageGalleryPage()
+            throw Error("Could not reach Image Gallery page " GetImageGalleryPageForIndex(imageIndex) " before editing image " imageIndex ".")
+    }
+    TestingLog(
+        "cms-image-metadata",
+        "Opening image " imageIndex
+        . "; gallery_page=" GetImageGalleryPageForIndex(imageIndex)
+        . "; slot=" (Mod(imageIndex - 1, imageGalleryPageSize) + 1)
+        . "; name_chars=" StrLen(imageName)
+        . "; title_chars=" StrLen(imageTitle)
+        . "; alt_chars=" StrLen(imageAlt) "."
+    )
+    OpenCmsImageDetailsForMetadata(imageIndex)
     if imageName != ""
         PasteToPoint("image_name", imageName)
     PasteToPoint("image_title", imageTitle)
@@ -2542,7 +2953,158 @@ PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt, imageName := "") {
 
     ; GO B2B requires this Image Save button to leave the image details page.
     ; This does not click the main product Save button.
-    ClickPoint("image_save_button", 1000)
+    ClickPoint("image_save_button", 250)
+    WaitForCmsImageGalleryAfterDetailsSave(imageIndex)
+    TestingLog(
+        "cms-image-metadata-saved",
+        "Image " imageIndex " detail record was populated, saved, and the Image Gallery return was verified."
+    )
+}
+
+OpenCmsImageDetailsForMetadata(imageIndex) {
+    global cmsImageDetailsOpenAttempts, cmsImageDetailsButtonTimeoutMs, cmsImageDetailsFormTimeoutMs
+    global imageGalleryPageSize
+
+    slotIndex := Mod(imageIndex - 1, imageGalleryPageSize) + 1
+    Loop cmsImageDetailsOpenAttempts {
+        attempt := A_Index
+        buttonInfo := WaitForVisibleImageGalleryDetailsButton(slotIndex, cmsImageDetailsButtonTimeoutMs)
+        if buttonInfo {
+            TestingLog(
+                "cms-image-details-open-attempt",
+                "Image=" imageIndex "; attempt=" attempt "; slot=" slotIndex
+                . "; source=UIA; x=" buttonInfo["x"] "; y=" buttonInfo["y"] "."
+            )
+            ; Use a physical click at the live UIA rectangle. This preserves the
+            ; proven browser interaction while avoiding stale fixed coordinates.
+            Click buttonInfo["x"], buttonInfo["y"]
+        } else {
+            ; Retain the configured screen point only as a compatibility fallback
+            ; if Chrome temporarily declines to expose visible Details buttons.
+            target := GetImageTarget(imageIndex)
+            point := target["details_button"]
+            TestingLog(
+                "cms-image-details-open-attempt",
+                "Image=" imageIndex "; attempt=" attempt "; slot=" slotIndex
+                . "; source=configured-fallback; x=" point[1] "; y=" point[2] "."
+            )
+            Click point[1], point[2]
+        }
+
+        if WaitForCmsImageDetailsFormReady(cmsImageDetailsFormTimeoutMs) {
+            TestingLog("cms-image-details-ready", "Image=" imageIndex "; attempt=" attempt ".")
+            return true
+        }
+
+        TestingLog(
+            "cms-image-details-open-miss",
+            "Image=" imageIndex "; attempt=" attempt "; the Title and Alt edit controls did not appear."
+        )
+        SaveTestingAccessibilityTree("cms-image-" imageIndex "-details-open-attempt-" attempt "-failed")
+        if attempt < cmsImageDetailsOpenAttempts {
+            ; Rebuild the exact page from a verified page 1 before retrying. This
+            ; handles a Save transition swallowing the first Details click.
+            OpenImageGalleryPageForIndex(imageIndex)
+        }
+    }
+
+    throw Error(
+        "Image " imageIndex " Details did not open after " cmsImageDetailsOpenAttempts " verified attempt(s)."
+        . " The script stopped before pasting into the wrong page."
+    )
+}
+
+WaitForVisibleImageGalleryDetailsButton(slotIndex, timeoutMs) {
+    deadline := A_TickCount + timeoutMs
+    Loop {
+        try {
+            document := UIA_Browser().GetCurrentDocumentElement()
+            gallery := FindImageGalleryScope(document)
+            if gallery {
+                buttons := gallery.FindElements({ Name: "Details", Type: "Button", mm: 3, cs: 0 })
+                visibleButtons := []
+                for _, button in buttons {
+                    try {
+                        if button.IsOffscreen || !button.IsEnabled
+                            continue
+                        rect := button.Location
+                        if rect.w <= 0 || rect.h <= 0
+                            continue
+                        item := Map(
+                            "x", Round(rect.x + rect.w / 2),
+                            "y", Round(rect.y + rect.h / 2)
+                        )
+                        insertAt := visibleButtons.Length + 1
+                        for existingIndex, existing in visibleButtons {
+                            if item["x"] < existing["x"] {
+                                insertAt := existingIndex
+                                break
+                            }
+                        }
+                        visibleButtons.InsertAt(insertAt, item)
+                    }
+                }
+                if visibleButtons.Length >= slotIndex
+                    return visibleButtons[slotIndex]
+            }
+        }
+        if A_TickCount >= deadline
+            return 0
+        Sleep 200
+    }
+}
+
+WaitForCmsImageDetailsFormReady(timeoutMs) {
+    deadline := A_TickCount + timeoutMs
+    Loop {
+        if IsEnabledUiaEditAtConfiguredPoint("image_title")
+            && IsEnabledUiaEditAtConfiguredPoint("image_alt")
+            return true
+        if A_TickCount >= deadline
+            return false
+        Sleep 200
+    }
+}
+
+IsEnabledUiaEditAtConfiguredPoint(coordinateName) {
+    global coords
+    point := coords[coordinateName]
+
+    try node := UIA.SmallestElementFromPoint(point[1], point[2])
+    catch
+        return false
+
+    Loop 8 {
+        try {
+            if StrLower(GetUiaControlTypeText(node)) = "edit" {
+                if node.IsOffscreen || !node.IsEnabled
+                    return false
+                return true
+            }
+        }
+        try parent := UIA.TreeWalkerTrue.GetParentElement(node)
+        catch
+            return false
+        if !parent
+            return false
+        node := parent
+    }
+    return false
+}
+
+WaitForCmsImageGalleryAfterDetailsSave(imageIndex) {
+    global cmsImageGalleryReturnTimeoutMs, cmsImageGalleryReturnSettleMs
+
+    startedAt := A_TickCount
+    WaitForImageGalleryAvailable(cmsImageGalleryReturnTimeoutMs)
+    Sleep cmsImageGalleryReturnSettleMs
+    ; Confirm the scope survived the final settle period instead of accepting a
+    ; short-lived transitional tree immediately after Save.
+    WaitForImageGalleryAvailable(cmsImageGalleryReturnTimeoutMs)
+    TestingLog(
+        "cms-image-gallery-return-ready",
+        "Image=" imageIndex "; elapsed_ms=" (A_TickCount - startedAt) "."
+    )
 }
 
 ; ==========================================================
@@ -2626,6 +3188,7 @@ Flash(message, durationMs := 1500) {
 ; ==========================================================
 
 ActivateWindow(title, wakeDelayMs := 300) {
+    TestingLog("window-activate-request", "Requested window: " title "; wake_delay_ms=" wakeDelayMs ".")
     if !WinExist(title) {
         throw Error("Window not found: " title)
     }
@@ -2647,6 +3210,7 @@ ActivateWindow(title, wakeDelayMs := 300) {
 
         if WinWaitActive(title, , 2) {
             Sleep wakeDelayMs
+            TestingLog("window-activated", GetTestingActiveWindowSummary())
             return true
         }
 
@@ -2669,6 +3233,10 @@ ClickPoint(name, delayMs := 250) {
         throw Error("Coordinate not set for: " name)
     }
 
+    TestingLog(
+        "coordinate-click",
+        "Name=" name "; x=" point[1] "; y=" point[2] "; delay_ms=" delayMs "; " GetTestingActiveWindowSummary()
+    )
     Click point[1], point[2]
     Sleep delayMs
 }
@@ -2678,7 +3246,9 @@ CopyFromPoint(name) {
     Sleep 150
     Send "^a"
     Sleep 150
-    return CopySelectedText(2, false)
+    text := CopySelectedText(2, false)
+    TestingLog("field-copy", "Field=" name "; chars=" StrLen(text) ".")
+    return text
 }
 
 CopyOptionalFromPoint(name) {
@@ -2686,7 +3256,9 @@ CopyOptionalFromPoint(name) {
     Sleep 150
     Send "^a"
     Sleep 150
-    return CopySelectedText(2, true)
+    text := CopySelectedText(2, true)
+    TestingLog("field-copy-optional", "Field=" name "; chars=" StrLen(text) ".")
+    return text
 }
 
 CopySelectedText(timeout := 2, allowBlank := false) {
@@ -2718,6 +3290,7 @@ PasteToPoint(name, text) {
     maxAttempts := 5
     lastActual := ""
     lastProblem := ""
+    TestingLog("field-paste-start", "Field=" name "; expected_chars=" StrLen(text) "; maximum_attempts=" maxAttempts ".")
 
     Loop maxAttempts {
         attempt := A_Index
@@ -2734,6 +3307,10 @@ PasteToPoint(name, text) {
             ; not place text on the clipboard.
             lastActual := CopyOptionalFromPoint(name)
             if NormalisePastedFieldValue(lastActual) = NormalisePastedFieldValue(text) {
+                TestingLog(
+                    "field-paste-verified",
+                    "Field=" name "; attempt=" attempt "; expected_chars=" StrLen(text) "; actual_chars=" StrLen(lastActual) "."
+                )
                 if attempt > 1
                     LogText("paste-verification", "Field '" name "' verified on attempt " attempt ".")
                 return true
@@ -2941,6 +3518,7 @@ LogText(prefix, text) {
     timestamp := FormatTime(, "yyyyMMdd-HHmmss")
     filePath := logDir "\" BuildRunArtifactFileName(prefix, timestamp)
     FileAppend text, filePath, "UTF-8"
+    TestingLog("run-log-saved", "Prefix=" prefix "; path=" filePath "; chars=" StrLen(text) ".")
 }
 
 BackupText(prefix, text) {
@@ -2949,6 +3527,231 @@ BackupText(prefix, text) {
     timestamp := FormatTime(, "yyyyMMdd-HHmmss")
     filePath := backupDir "\" BuildRunArtifactFileName(prefix, timestamp)
     FileAppend text, filePath, "UTF-8"
+    TestingLog("backup-saved", "Prefix=" prefix "; path=" filePath "; chars=" StrLen(text) ".")
+}
+
+; ==========================================================
+; OPTIONAL TESTING-MODE DIAGNOSTICS
+; ==========================================================
+
+EnsureTestingSessionLog() {
+    global testingModeEnabled, testingSessionLogPath, testingSessionId, debugDir
+
+    if !testingModeEnabled
+        return ""
+    if testingSessionLogPath != ""
+        return testingSessionLogPath
+
+    try {
+        EnsureFolders()
+        processId := DllCall("GetCurrentProcessId")
+        testingSessionId := FormatTime(, "yyyyMMdd-HHmmss") "-pid" processId
+        testingSessionLogPath := debugDir "\testing-session-" testingSessionId ".log.txt"
+        header := "CROMARTIE TESTING DIAGNOSTIC SESSION`n"
+            . "Started: " FormatTime(, "yyyy-MM-dd HH:mm:ss") "`n"
+            . "Session: " testingSessionId "`n"
+            . BuildTestingRuntimeSummary()
+            . "`n`n"
+        FileAppend header, testingSessionLogPath, "UTF-8"
+        return testingSessionLogPath
+    } catch {
+        ; Diagnostics must never interrupt the production automation.
+        testingSessionLogPath := ""
+        return ""
+    }
+}
+
+TestingLog(eventName, details := "") {
+    global testingModeEnabled, testingSessionLogPath
+
+    if !testingModeEnabled
+        return false
+    try {
+        if EnsureTestingSessionLog() = ""
+            return false
+        timestamp := FormatTime(, "yyyy-MM-dd HH:mm:ss")
+        tick := A_TickCount
+        entry := "[" timestamp "] [tick=" tick "] [" eventName "]`n"
+        if details != ""
+            entry .= details "`n"
+        entry .= "`n"
+        FileAppend entry, testingSessionLogPath, "UTF-8"
+        return true
+    } catch {
+        return false
+    }
+}
+
+BuildTestingRuntimeSummary() {
+    global SeoAutomationMode, imageCountToProcess, maximumImagesPerProduct
+    global imageTabLoadDelayMs, imageGalleryAvailabilityTimeoutMs, imageGalleryCountTimeoutMs
+    global imageGalleryCountStableDurationMs, imageGalleryMinimumObservationMs
+    global imageGalleryPageChangeTimeoutMs, imageGalleryFirstPageNoChangeTimeoutMs
+    global imageCopyPreCopyDelayMs
+    global chatImageWindowWakeDelayMs, chatImageFocusDelayMs, chatImageAttachmentTimeoutMs
+    global chatImageAttachmentPollIntervalMs, chatImageAttachmentSettleMs, chatImagePasteFallbackDelayMs
+    global chatSubmitPreEnterDelayMs
+    global cmsImageDetailsButtonTimeoutMs, cmsImageDetailsFormTimeoutMs, cmsImageDetailsOpenAttempts
+    global cmsImageGalleryReturnTimeoutMs, cmsImageGalleryReturnSettleMs
+    global fullWorkflowAutomationEnabled, departmentAutomationEnabled
+    global cmsWinTitle, chatgptWinTitle, coords
+
+    summary := "AutoHotkey version: " A_AhkVersion
+        . "`nOS: " A_OSVersion
+        . "`n64-bit OS: " (A_Is64bitOS ? "yes" : "no")
+        . "`nProcess admin: " (A_IsAdmin ? "yes" : "no")
+        . "`nScreen: " A_ScreenWidth "x" A_ScreenHeight
+        . "`nSEO mode: " SeoAutomationMode
+        . "`nCurrent image count: " imageCountToProcess
+        . "`nMaximum images: " maximumImagesPerProduct
+        . "`nImages-tab fixed delay ms: " imageTabLoadDelayMs
+        . "`nGallery availability timeout ms: " imageGalleryAvailabilityTimeoutMs
+        . "`nGallery count timeout ms: " imageGalleryCountTimeoutMs
+        . "`nGallery count stable duration ms: " imageGalleryCountStableDurationMs
+        . "`nGallery minimum observation ms: " imageGalleryMinimumObservationMs
+        . "`nGallery page-change timeout ms: " imageGalleryPageChangeTimeoutMs
+        . "`nGallery first-page no-change timeout ms: " imageGalleryFirstPageNoChangeTimeoutMs
+        . "`nImage pre-copy delay ms: " imageCopyPreCopyDelayMs
+        . "`nChatGPT image window wake delay ms: " chatImageWindowWakeDelayMs
+        . "`nChatGPT image focus delay ms: " chatImageFocusDelayMs
+        . "`nChatGPT attachment timeout ms: " chatImageAttachmentTimeoutMs
+        . "`nChatGPT attachment poll interval ms: " chatImageAttachmentPollIntervalMs
+        . "`nChatGPT attachment settle ms: " chatImageAttachmentSettleMs
+        . "`nChatGPT image fallback delay ms: " chatImagePasteFallbackDelayMs
+        . "`nChatGPT pre-Enter draft-settle delay ms: " chatSubmitPreEnterDelayMs
+        . "`nCMS image Details button timeout ms: " cmsImageDetailsButtonTimeoutMs
+        . "`nCMS image Details form timeout ms: " cmsImageDetailsFormTimeoutMs
+        . "`nCMS image Details open attempts: " cmsImageDetailsOpenAttempts
+        . "`nCMS image gallery-return timeout ms: " cmsImageGalleryReturnTimeoutMs
+        . "`nCMS image gallery-return settle ms: " cmsImageGalleryReturnSettleMs
+        . "`nFull workflow automation enabled: " (fullWorkflowAutomationEnabled ? "yes" : "no")
+        . "`nDepartment automation enabled: " (departmentAutomationEnabled ? "yes" : "no")
+        . "`nCMS window match: " cmsWinTitle
+        . "`nChatGPT window match: " chatgptWinTitle
+        . "`n" GetTestingActiveWindowSummary()
+        . "`nCoordinates:"
+    for name, point in coords
+        summary .= "`n  " name "=" point[1] "," point[2]
+    return summary
+}
+
+GetTestingActiveWindowSummary() {
+    try {
+        hwnd := WinExist("A")
+        if !hwnd
+            return "Active window: none"
+        title := WinGetTitle("ahk_id " hwnd)
+        processName := WinGetProcessName("ahk_id " hwnd)
+        minMax := WinGetMinMax("ahk_id " hwnd)
+        WinGetPos &x, &y, &width, &height, "ahk_id " hwnd
+        return "Active window: hwnd=" hwnd
+            . "; process=" processName
+            . "; state=" minMax
+            . "; rect=" x "," y " " width "x" height
+            . "; title=" title
+    } catch as err {
+        return "Active window could not be inspected: " FormatTestingError(err)
+    }
+}
+
+FormatTestingError(err) {
+    if !IsObject(err)
+        return err ""
+
+    text := "Message: " err.Message
+    try {
+        if err.What != ""
+            text .= "`nWhat: " err.What
+    }
+    try {
+        if err.File != ""
+            text .= "`nFile: " err.File
+    }
+    try {
+        if err.Line != ""
+            text .= "`nLine: " err.Line
+    }
+    try {
+        if err.Extra != ""
+            text .= "`nExtra: " err.Extra
+    }
+    try {
+        if err.Stack != ""
+            text .= "`nStack:`n" err.Stack
+    }
+    return text
+}
+
+SanitiseTestingFilePart(value) {
+    value := RegExReplace(Trim(value), "[^A-Za-z0-9_-]+", "-")
+    value := Trim(value, "-")
+    return value = "" ? "diagnostic" : SubStr(value, 1, 80)
+}
+
+SaveTestingElementDump(element, context) {
+    global testingModeEnabled, testingSessionId, testingArtifactSequence, debugDir
+
+    if !testingModeEnabled
+        return ""
+    try {
+        if EnsureTestingSessionLog() = ""
+            return ""
+        testingArtifactSequence += 1
+        safeContext := SanitiseTestingFilePart(context)
+        sequence := Format("{:04}", testingArtifactSequence)
+        path := debugDir "\testing-" testingSessionId "-" sequence "-" safeContext "-uia-element.txt"
+        contents := "Context: " context "`nCaptured: " FormatTime(, "yyyy-MM-dd HH:mm:ss") "`n"
+            . GetTestingActiveWindowSummary() "`n`n" element.DumpAll()
+        FileAppend contents, path, "UTF-8"
+        TestingLog("uia-element-saved", "Context=" context "; path=" path "; chars=" StrLen(contents) ".")
+        return path
+    } catch as err {
+        TestingLog("uia-element-failed", "Context=" context "; " FormatTestingError(err))
+        return ""
+    }
+}
+
+SaveTestingAccessibilityTree(context) {
+    global testingModeEnabled, testingSessionId, testingArtifactSequence, debugDir, LastDocument
+
+    if !testingModeEnabled
+        return ""
+    try {
+        if EnsureTestingSessionLog() = ""
+            return ""
+        testingArtifactSequence += 1
+        document := UIA_Browser().GetCurrentDocumentElement()
+        LastDocument := document
+        safeContext := SanitiseTestingFilePart(context)
+        sequence := Format("{:04}", testingArtifactSequence)
+        path := debugDir "\testing-" testingSessionId "-" sequence "-" safeContext "-accessibility-tree.txt"
+        contents := "Context: " context "`nCaptured: " FormatTime(, "yyyy-MM-dd HH:mm:ss") "`n"
+            . GetTestingActiveWindowSummary() "`n`n" document.DumpAll()
+        FileAppend contents, path, "UTF-8"
+        TestingLog("accessibility-tree-saved", "Context=" context "; path=" path "; chars=" StrLen(contents) ".")
+        return path
+    } catch as err {
+        TestingLog("accessibility-tree-failed", "Context=" context "; " FormatTestingError(err))
+        return ""
+    }
+}
+
+ReportTestingError(context, err, captureAccessibilityTree := true) {
+    TestingLog(
+        "error-" SanitiseTestingFilePart(context),
+        FormatTestingError(err) "`n" GetTestingActiveWindowSummary()
+    )
+    if captureAccessibilityTree
+        SaveTestingAccessibilityTree(context "-error")
+}
+
+LogUnhandledErrorForTesting(thrownValue, mode) {
+    ReportTestingError("unhandled-mode-" mode, thrownValue)
+    return false
+}
+
+LogTestingSessionExit(exitReason, exitCode) {
+    TestingLog("session-exit", "Reason=" exitReason "; code=" exitCode ".")
 }
 
 ; ==========================================================
@@ -2970,11 +3773,28 @@ InitialiseSeoPromptSettings() {
 
 ApplySharedSeoPromptSettings(settings) {
     global SeoAutomationMode, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault, promotionText
+    global testingModeEnabled
+
+    testingWasEnabled := testingModeEnabled
     SeoAutomationMode := settings["seoAutomationMode"]
     hardcodedPageUrl := settings["pageUrl"]
     requiredInternalLinksDefault := BuildBotzRecommendedInlinks(settings)
     additionalProductNotesDefault := settings["additionalNotes"] != "" ? settings["additionalNotes"] : "NONE"
     promotionText := settings["promotionText"]
+    testingModeEnabled := settings["testingModeEnabled"]
+
+    if testingModeEnabled {
+        EnsureTestingSessionLog()
+        TestingLog(
+            testingWasEnabled ? "settings-applied" : "testing-mode-enabled",
+            BuildTestingRuntimeSummary()
+        )
+    } else if testingWasEnabled {
+        ; Record the final setting change while diagnostics are still enabled.
+        testingModeEnabled := true
+        TestingLog("testing-mode-disabled", "Testing mode was disabled and saved from the SEO Prompt Settings menu.")
+        testingModeEnabled := false
+    }
 }
 
 CreateDefaultBotzPromptSettings() {
@@ -2989,7 +3809,8 @@ CreateDefaultBotzPromptSettings() {
         "inlink2Url", "",
         "inlinkExtra", "",
         "additionalNotes", "",
-        "promotionText", ""
+        "promotionText", "",
+        "testingModeEnabled", false
     )
 }
 
@@ -3024,6 +3845,10 @@ OpenSeoPromptSettingsGui() {
     controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Used only by promotion_text mode. It is pasted into both the Description and Custom fields.")
     controls["seoAutomationMode"].OnEvent("Change", UpdatePromotionTextSettingsControls.Bind(controls))
     UpdatePromotionTextSettingsControls(controls)
+
+    controls["testingModeEnabled"] := settingsGui.AddCheckBox("xm y+14 w700", "Testing mode (save detailed diagnostics for future debugging)")
+    controls["testingModeEnabled"].Value := botzPromptSettings["testingModeEnabled"] ? 1 : 0
+    settingsGui.AddText("xm y+4 w700", "Records workflow events, timing/count samples, errors, window state and relevant accessibility trees in the debug folder.")
 
     settingsGui.AddText("xm y+14", "Cromartie page URL")
     controls["pageUrl"] := settingsGui.AddEdit("xm y+4 w700", botzPromptSettings["pageUrl"])
@@ -3069,7 +3894,8 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
         "inlink2Url", Trim(controls["inlink2Url"].Value),
         "inlinkExtra", Trim(controls["inlinkExtra"].Value),
         "additionalNotes", Trim(controls["additionalNotes"].Value),
-        "promotionText", Trim(controls["promotionText"].Value, " `t`r`n")
+        "promotionText", Trim(controls["promotionText"].Value, " `t`r`n"),
+        "testingModeEnabled", controls["testingModeEnabled"].Value = 1
     )
 
     try {
@@ -3080,8 +3906,10 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
         botzPromptSettings := settings
         ApplySharedSeoPromptSettings(settings)
         CloseSeoPromptSettingsGui(settingsGui)
-        Flash("SEO prompt settings saved.`nMode: " settings["seoAutomationMode"], 2500)
+        testingStatus := settings["testingModeEnabled"] ? "ON" : "OFF"
+        Flash("SEO prompt settings saved.`nMode: " settings["seoAutomationMode"] "`nTesting mode: " testingStatus, 2500)
     } catch as err {
+        ReportTestingError("save-seo-prompt-settings", err, false)
         MsgBox "SEO prompt settings were not saved.`n`n" err.Message
     }
 }
@@ -3105,6 +3933,10 @@ ValidateBotzPromptSettings(settings) {
         throw Error("Select a valid SEO automation mode.")
     if !settings.Has("promotionText")
         throw Error("The promotion-text setting is missing.")
+    if !settings.Has("testingModeEnabled")
+        throw Error("The testing-mode setting is missing.")
+    if settings["testingModeEnabled"] != true && settings["testingModeEnabled"] != false
+        throw Error("The testing-mode setting must be enabled or disabled.")
     if settings["seoAutomationMode"] = "promotion_text" && Trim(settings["promotionText"], " `t`r`n") = ""
         throw Error("Enter the promotional text before saving promotion_text mode.")
     if settings["pageUrl"] = ""
@@ -3142,6 +3974,7 @@ SaveBotzPromptSettings(settings) {
     text .= "inlink_extra`t" EncodeStateValue(settings["inlinkExtra"]) "`n"
     text .= "additional_notes`t" EncodeStateValue(settings["additionalNotes"]) "`n"
     text .= "promotion_text`t" EncodeStateValue(settings["promotionText"]) "`n"
+    text .= "testing_mode_enabled`t" (settings["testingModeEnabled"] ? "1" : "0") "`n"
 
     temporaryPath := botzPromptSettingsFilePath ".tmp"
     if FileExist(temporaryPath)
@@ -3188,6 +4021,14 @@ LoadBotzPromptSettings() {
     }
     ; Keep settings files saved before promotion_text mode backward compatible.
     settings["promotionText"] := values.Has("promotion_text") ? values["promotion_text"] : ""
+    ; Keep settings files saved before diagnostic testing mode backward compatible.
+    if values.Has("testing_mode_enabled")
+        && values["testing_mode_enabled"] != "0"
+        && values["testing_mode_enabled"] != "1"
+        throw Error("The saved testing-mode setting must be 0 or 1.")
+    settings["testingModeEnabled"] := values.Has("testing_mode_enabled")
+        ? values["testing_mode_enabled"] = "1"
+        : false
     ; Files saved before the mode dropdown existed remain valid and retain the
     ; configured SeoAutomationMode from the top of this script until next save.
     settings["seoAutomationMode"] := values.Has("seo_automation_mode")
@@ -3631,11 +4472,14 @@ WaitForBotzChatAttachmentBatch(imageFiles, supplierName := "BOTZ") {
 }
 
 SubmitBotzChatGptDraft(supplierName := "BOTZ", logPrefix := "botz") {
-    global chatgptWinTitle, botzChatAttachmentSettleMs
-    ToolTip supplierName " attachments settled. Sending the ChatGPT request..."
+    global chatgptWinTitle, botzChatAttachmentSettleMs, chatSubmitPreEnterDelayMs
+    ToolTip supplierName " attachments settled. Waiting " Round(chatSubmitPreEnterDelayMs / 1000, 1) " seconds before sending..."
     ActivateWindow(chatgptWinTitle, 300)
     FocusChatGptInputForPaste()
-    LogText(logPrefix "-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second " supplierName " attachment timer.")
+    TestingLog("chatgpt-pre-submit-wait", "Delay_ms=" chatSubmitPreEnterDelayMs "; workflow=" logPrefix "; supplier=" supplierName ".")
+    Sleep chatSubmitPreEnterDelayMs
+    FocusChatGptInputForPaste()
+    LogText(logPrefix "-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second " supplierName " attachment timer plus a " Round(chatSubmitPreEnterDelayMs / 1000, 1) "-second draft-settle wait.")
     Send "{Enter}"
 }
 
@@ -5667,9 +6511,14 @@ DumpAccessibilityTree() {
             FileDelete path
         ToolTip "Creating accessibility-tree dump..."
         FileAppend LastDocument.DumpAll(), path, "UTF-8"
+        testingPath := SaveTestingAccessibilityTree("manual-f9")
         ToolTip()
-        MsgBox "Accessibility tree saved to:`n" path
+        message := "Accessibility tree saved to:`n" path
+        if testingPath != ""
+            message .= "`n`nTesting-mode copy saved to:`n" testingPath
+        MsgBox message
     } catch as err {
+        ReportTestingError("manual-f9-accessibility-tree", err, false)
         ToolTip()
         MsgBox "Accessibility-tree dump failed:`n`n" err.Message
     }
