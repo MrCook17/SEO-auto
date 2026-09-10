@@ -50,12 +50,14 @@ chatgptWinTitle := "Colour & Glaze"
 ; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
 ; "figuredart" = Figured'Art Product Creation from the matching C:\FiguredArt product folder
 ; "promotion_text" = paste the configured promotional text into Description and Custom
+; "promotion_text_reference" = find every Simple Product (Reference) on the
+; current catalogue page, reopen each by stock-code search and paste the same text
 ; This is the fallback used by older settings files. Saving the
 ; Ctrl+Shift+NumLock menu persists the selected mode across reloads.
 SeoAutomationMode := "full"
 
 ; PROMOTION TEXT TEST-SAVE SWITCH: change false to true to click the main
-; product Save button and allow department-wide promotion_text runs.
+; product Save button and allow promotion_text and promotion_text_reference runs.
 promotionTextSaveEnabled := true
 
 promptDir := A_ScriptDir "\prompts"
@@ -229,11 +231,22 @@ departmentAutomationEnabled := false
 departmentCatalogueWaitMs := 10000
 departmentCatalogueTreeTimeoutMs := 25000
 departmentProductOpenDelayMs := 10000
+promotionReferenceSearchTimeoutMs := 20000
+promotionReferenceProductOpenDelayMs := 5000
+promotionReferenceCatalogueReturnDelayMs := 2500
+promotionReferenceScanMaxScrollSteps := 100
+promotionReferenceScanNoChangeStopCount := 3
+promotionReferenceScanWheelNotches := 5
+global promotionReferenceBatchActive := false
+global promotionReferenceStopAfterCurrent := false
 
 ; Coordinates from docs\config-notes.md
 coords := Map(
     ; Initial CMS page
     "product_edit_button", [1437, 310],
+    "catalogue_product_list_scan_anchor", [1000, 700],
+    "catalogue_search_input", [1649, 264],
+    "catalogue_search_button", [1836, 326],
     ; "product_edit_button", [1483, 310], ; x: 1483, y: 310
     ; Product page tabs/buttons
     "overview_tab", [288, 260],
@@ -403,6 +416,12 @@ ToggleDepartmentAutomation() {
 
 RequestDepartmentStopAfterCurrent() {
     global departmentAutomationActive, departmentStopAfterCurrent
+    global promotionReferenceBatchActive, promotionReferenceStopAfterCurrent
+    if promotionReferenceBatchActive {
+        promotionReferenceStopAfterCurrent := true
+        Flash("Reference promotion-text stop requested.`nThe current product will finish and save first.", 3000)
+        return true
+    }
     if !departmentAutomationActive {
         Flash("No department automation run is active.", 2000)
         return false
@@ -456,6 +475,11 @@ OpenProductBuildPromptAndPasteToChatGPT() {
         ; Do not copy the browser URL here because the active page is a GO B2B CMS URL.
         pageUrl := hardcodedPageUrl
 
+        if IsPromotionTextReferenceMode() {
+            RunPromotionTextReferenceWorkflow()
+            return
+        }
+
         if IsMatrixImageMode()
             throw Error("NumpadEnter is not used for matrix-image mode. Open the matrix parent and press Numpad4.")
 
@@ -499,6 +523,8 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
     ; Use the temporary hardcoded public URL for {{PAGE_URL}}. Do not copy the
     ; browser URL because the active page is a GO b2b CMS URL.
     pageUrl := hardcodedPageUrl
+    if IsPromotionTextReferenceMode()
+        return RunPromotionTextReferenceWorkflow()
     if IsPromotionTextMode()
         return RunPromotionTextWorkflow()
     if IsSupplierProductCreationMode()
@@ -602,12 +628,12 @@ ValidateSeoAutomationMode() {
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart' or 'promotion_text'.")
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text' or 'promotion_text_reference'.")
     }
 }
 
 GetSeoAutomationModeOptions() {
-    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text"]
+    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text", "promotion_text_reference"]
 }
 
 IsValidSeoAutomationMode(mode) {
@@ -663,6 +689,14 @@ IsFiguredArtMode() {
 
 IsPromotionTextMode() {
     return GetSeoAutomationMode() = "promotion_text"
+}
+
+IsPromotionTextReferenceMode() {
+    return GetSeoAutomationMode() = "promotion_text_reference"
+}
+
+IsAnyPromotionTextMode() {
+    return IsPromotionTextMode() || IsPromotionTextReferenceMode()
 }
 
 IsSupplierProductCreationMode() {
@@ -2013,6 +2047,10 @@ StartDepartmentAutomation() {
     global promotionTextSaveEnabled
 
     ValidateSeoAutomationMode()
+    if IsPromotionTextReferenceMode() {
+        MsgBox "promotion_text_reference has its own stock-code search batch.`n`nOpen the catalogue product list and press NumpadEnter or Numpad4. Department automation does not need to be enabled."
+        return false
+    }
     departmentWorkflowMode := GetSeoAutomationMode()
     departmentProductType := GetDepartmentProductTypeForSeoMode(departmentWorkflowMode)
 
@@ -2821,6 +2859,348 @@ ParseAutomationOutput(block, imageCount, metadataOnly := false) {
 ; CMS INSERTION HELPERS
 ; ==========================================================
 
+RunPromotionTextReferenceWorkflow() {
+    global cmsWinTitle, promotionText, promotionTextSaveEnabled
+    global promotionReferenceBatchActive, promotionReferenceStopAfterCurrent
+    global promotionReferenceCatalogueReturnDelayMs
+    global departmentAutomationActive, automaticWorkflowActive
+
+    if Trim(promotionText, " `t`r`n") = ""
+        throw Error("Promotional text is blank. Enter it in Ctrl+Shift+NumLock and save the settings first.")
+    if !promotionTextSaveEnabled
+        throw Error("promotion_text_reference cannot run while promotionTextSaveEnabled is false, because every saved product must return to the catalogue before the next stock-code search.")
+    if promotionReferenceBatchActive
+        throw Error("A reference promotion-text batch is already active.")
+    if departmentAutomationActive || automaticWorkflowActive
+        throw Error("Another automatic workflow is already active. Let it finish before starting the reference promotion-text batch.")
+
+    promotionReferenceBatchActive := true
+    promotionReferenceStopAfterCurrent := false
+    completedCount := 0
+    totalCount := 0
+    try {
+        EnsureFolders()
+        ActivateWindow(cmsWinTitle)
+        references := CollectAllCatalogueReferenceProducts()
+        totalCount := references.Length
+        if totalCount = 0
+            throw Error("No 'Simple Product (Reference)' rows were found on the current catalogue page's accessibility tree.")
+
+        referenceLog := "Reference products detected: " totalCount
+        for index, reference in references
+            referenceLog .= "`n" index ". " reference["productCode"] " - " reference["productName"]
+        ; This inventory is collected before any product is opened, so there is
+        ; deliberately no active stock-code identity for a product-scoped log.
+        TestingLog("promotion-reference-products", referenceLog)
+
+        for index, reference in references {
+            ToolTip "REFERENCE PROMOTION-TEXT BATCH"
+                . "`nProduct " index " of " totalCount
+                . "`nSearching for code: " reference["productCode"]
+                . "`nCtrl+Numpad6: stop after this product"
+
+            SearchAndOpenCatalogueReferenceProduct(reference, index, totalCount)
+            if !RunPromotionTextWorkflow()
+                throw Error("Promotional text was not completed for reference product '" reference["productCode"] "'.")
+            completedCount += 1
+
+            LogText(
+                "promotion-reference-product-complete",
+                "Reference product " completedCount " of " totalCount " completed and saved."
+                . "`nProduct name: " reference["productName"]
+                . "`nProduct code: " reference["productCode"]
+            )
+
+            if promotionReferenceStopAfterCurrent {
+                MsgBox "Reference promotion-text batch stopped safely after saving the current product.`n`nProducts completed: " completedCount " of " totalCount
+                return true
+            }
+            if index < totalCount {
+                ToolTip "REFERENCE PROMOTION-TEXT BATCH"
+                    . "`nSaved " completedCount " of " totalCount
+                    . "`nWaiting for the catalogue search before the next code..."
+                Sleep promotionReferenceCatalogueReturnDelayMs
+            }
+        }
+
+        LogText("promotion-reference-complete", "Reference promotion-text batch completed " completedCount " product(s).")
+        MsgBox "Reference promotion-text batch is complete.`n`nProducts completed: " completedCount
+        return true
+    } catch as err {
+        ReportTestingError("promotion-reference-batch", err)
+        MsgBox "Reference promotion-text batch stopped.`n`nProducts completed: " completedCount " of " totalCount "`n`n" err.Message
+        return false
+    } finally {
+        promotionReferenceBatchActive := false
+        promotionReferenceStopAfterCurrent := false
+        ToolTip()
+    }
+}
+
+CollectAllCatalogueReferenceProducts() {
+    global cmsWinTitle, coords
+    global promotionReferenceScanMaxScrollSteps, promotionReferenceScanNoChangeStopCount
+    global promotionReferenceScanWheelNotches
+
+    anchor := coords["catalogue_product_list_scan_anchor"]
+    MouseMove anchor[1], anchor[2], 0
+    SendNativeMouseWheel(1, 120)
+    Sleep 900
+
+    collected := []
+    seenCodes := Map()
+    priorSignature := ""
+    unchangedCount := 0
+
+    Loop promotionReferenceScanMaxScrollSteps + 1 {
+        scan := WaitForCatalogueReferenceProductScan(5000)
+
+        for _, reference in scan["references"] {
+            key := StrLower(reference["productCode"])
+            if seenCodes.Has(key) {
+                if NormaliseCatalogueProductName(seenCodes[key]) != NormaliseCatalogueProductName(reference["productName"])
+                    throw Error("Stock code '" reference["productCode"] "' belongs to more than one Simple Product (Reference) row.")
+                continue
+            }
+            seenCodes[key] := reference["productName"]
+            collected.Push(reference)
+        }
+
+        signature := BuildCatalogueRowSignature(scan["rowTexts"])
+        ToolTip "REFERENCE PROMOTION-TEXT BATCH"
+            . "`nScanning the catalogue accessibility tree..."
+            . "`nReference codes found: " collected.Length
+            . "`nScroll step: " (A_Index - 1)
+
+        if signature = priorSignature
+            unchangedCount += 1
+        else {
+            priorSignature := signature
+            unchangedCount := 0
+        }
+        if unchangedCount >= promotionReferenceScanNoChangeStopCount
+            return collected
+
+        MouseMove anchor[1], anchor[2], 0
+        SendNativeMouseWheel(-1, promotionReferenceScanWheelNotches)
+        Sleep 650
+    }
+
+    throw Error("The catalogue reference scan reached its " promotionReferenceScanMaxScrollSteps "-step safety limit before the product list stopped changing.")
+}
+
+WaitForCatalogueReferenceProductScan(timeoutMs) {
+    global cmsWinTitle
+    deadline := A_TickCount + timeoutMs
+    lastProblem := ""
+    Loop {
+        try {
+            ActivateWindow(cmsWinTitle, 100)
+            document := UIA_Browser().GetCurrentDocumentElement()
+            return CollectCatalogueReferenceProductsFromDocument(document)
+        } catch as err {
+            lastProblem := err.Message
+        }
+        if A_TickCount >= deadline
+            throw Error("The catalogue accessibility tree did not become ready for the reference scan.`n" lastProblem)
+        Sleep 250
+    }
+}
+
+CollectCatalogueReferenceProductsFromDocument(document) {
+    try {
+        catalogueList := document.FindElement({ AutomationId: "catalogueNodeListView" })
+        listItems := catalogueList.FindElements({ Type: "ListItem" })
+    } catch as err {
+        throw Error("The catalogue product list was not available in the current accessibility tree.`n" err.Message)
+    }
+
+    references := []
+    rowTexts := []
+    for _, listItem in listItems {
+        try rowClass := listItem.ClassName
+        catch
+            continue
+        if !InStr(StrLower(rowClass), "cms-catalogue-tile")
+            continue
+        try rowText := NormaliseCatalogueTileText(listItem.Name)
+        catch
+            continue
+        if rowText = ""
+            continue
+        rowTexts.Push(rowText)
+        identity := ParseCatalogueReferenceProductIdentity(rowText)
+        if identity
+            references.Push(identity)
+    }
+    return Map("references", references, "rowTexts", rowTexts)
+}
+
+ParseCatalogueReferenceProductIdentity(rowText) {
+    text := NormaliseCatalogueTileText(rowText)
+    if !RegExMatch(text, "i)^Simple Product\s+\(Reference\)\s+(.+)$", &match)
+        return 0
+
+    body := Trim(match[1])
+    if !RegExMatch(body, "^(.+\S)\s+(\S+)$", &identityMatch)
+        return 0
+    productName := Trim(identityMatch[1])
+    productCode := Trim(identityMatch[2])
+    if productName = "" || productCode = ""
+        return 0
+    return Map(
+        "productType", "Simple Product (Reference)",
+        "productName", productName,
+        "productCode", productCode,
+        "rowText", text
+    )
+}
+
+BuildCatalogueRowSignature(rowTexts) {
+    signature := ""
+    for _, rowText in rowTexts
+        signature .= (signature = "" ? "" : "`n") rowText
+    return signature
+}
+
+SearchAndOpenCatalogueReferenceProduct(reference, productNumber, productCount) {
+    global cmsWinTitle, coords
+    global promotionReferenceSearchTimeoutMs, promotionReferenceProductOpenDelayMs
+    stockCode := reference["productCode"]
+
+    ActivateWindow(cmsWinTitle)
+    searchButtonPoint := WaitForVisibleExactNamedControlPoint("Search", coords["catalogue_search_button"], promotionReferenceSearchTimeoutMs)
+    if !searchButtonPoint
+        throw Error("The catalogue Search controls did not become available before searching for '" stockCode "'.")
+    ClickPoint("catalogue_search_input", 200)
+    Send "^a"
+    Sleep 150
+    PasteText(stockCode)
+    ClickPoint("catalogue_search_button", 500)
+
+    resultPoint := WaitForCatalogueReferenceSearchResult(stockCode, promotionReferenceSearchTimeoutMs)
+    if !resultPoint
+        throw Error("Search did not expose a visible result row with the exact stock code '" stockCode "'.")
+
+    ToolTip "REFERENCE PROMOTION-TEXT BATCH"
+        . "`nProduct " productNumber " of " productCount
+        . "`nOpening exact search result: " stockCode
+    MouseMove resultPoint.CentreX, resultPoint.CentreY, 0
+    Sleep 250
+    Click resultPoint.CentreX, resultPoint.CentreY, 2
+    Sleep promotionReferenceProductOpenDelayMs
+
+    overviewPoint := WaitForVisibleExactNamedControlPoint("Overview", coords["overview_tab"], promotionReferenceSearchTimeoutMs)
+    if !overviewPoint
+        throw Error("Double-clicking search result '" stockCode "' did not expose the product Overview tab.")
+
+    openedIdentity := ReadOpenCmsProductIdentity()
+    if StrLower(CleanText(openedIdentity["productCode"])) != StrLower(CleanText(stockCode))
+        throw Error(
+            "The search result opened the wrong product."
+            . "`nExpected code: " stockCode
+            . "`nOpened code: " EmptyToNA(openedIdentity["productCode"])
+        )
+    return openedIdentity
+}
+
+WaitForCatalogueReferenceSearchResult(stockCode, timeoutMs) {
+    global cmsWinTitle
+    deadline := A_TickCount + timeoutMs
+    priorSignature := ""
+    stableSince := 0
+
+    Loop {
+        point := 0
+        try {
+            ActivateWindow(cmsWinTitle, 100)
+            browser := UIA_Browser(cmsWinTitle)
+            document := browser.GetCurrentDocumentElement()
+            point := FindCatalogueReferenceSearchResultPoint(document, stockCode, "current browser document")
+            if !point
+                point := FindCatalogueReferenceSearchResultPoint(browser.BrowserElement, stockCode, "complete Chrome window")
+        }
+
+        if point {
+            signature := point.X "," point.Y "," point.W "," point.H
+            if signature = priorSignature {
+                if stableSince && A_TickCount - stableSince >= 500
+                    return point
+            } else {
+                priorSignature := signature
+                stableSince := A_TickCount
+            }
+        } else {
+            priorSignature := ""
+            stableSince := 0
+        }
+        if A_TickCount >= deadline
+            return 0
+        Sleep 250
+    }
+}
+
+FindCatalogueReferenceSearchResultPoint(searchRoot, stockCode, scopeLabel) {
+    global coords
+    try elements := searchRoot.FindElements({ Name: stockCode, mm: 2, cs: 0 })
+    catch
+        return 0
+
+    searchPaneMinimumX := coords["catalogue_search_input"][1] - 150
+    best := 0
+    bestScore := 0
+    for _, element in elements {
+        try {
+            name := NormaliseCatalogueTileText(element.Name)
+            if !CatalogueAccessibilityTextContainsExactCode(name, stockCode)
+                continue
+            if element.IsOffscreen || !element.IsEnabled
+                continue
+            controlType := StrLower(GetUiaControlTypeText(element))
+            ; The query edit can expose its current value as an accessible name
+            ; in some Chrome builds. Never mistake that input for the result row.
+            if controlType = "edit" || controlType = "combobox" || controlType = "combo box"
+                || controlType = "document" || controlType = "pane"
+                continue
+            rect := element.Location
+            if rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.y < 0
+                continue
+            centreX := Round(rect.x + rect.w / 2)
+            centreY := Round(rect.y + rect.h / 2)
+            if centreX < searchPaneMinimumX
+                continue
+            if centreY <= coords["catalogue_search_input"][2] + 20
+                continue
+
+            exactName := StrLower(name) = StrLower(stockCode)
+            score := (exactName ? 0 : 1000000000) + (rect.w * rect.h)
+            if !best || score < bestScore {
+                best := {
+                    X: Round(rect.x),
+                    Y: Round(rect.y),
+                    W: Round(rect.w),
+                    H: Round(rect.h),
+                    CentreX: centreX,
+                    CentreY: centreY,
+                    RowText: name,
+                    ScopeLabel: scopeLabel
+                }
+                bestScore := score
+            }
+        }
+    }
+    return best
+}
+
+CatalogueAccessibilityTextContainsExactCode(text, stockCode) {
+    target := StrLower(Trim(stockCode))
+    for _, token in StrSplit(NormaliseCatalogueTileText(text), " ") {
+        if StrLower(token) = target
+            return true
+    }
+    return false
+}
+
 RunPromotionTextWorkflow() {
     global cmsWinTitle, promotionText, promotionTextSaveEnabled
     global lastSavedNonMatrixProductIdentity
@@ -2875,7 +3255,7 @@ ScrollPromotionDescriptionToBottom() {
     ; focus after it is clicked, and GO b2b's tab strip can interpret End as a
     ; request to activate its final (Custom) tab. Native wheel input over a blank
     ; part of the page body scrolls Description without changing tabs.
-    MouseMove 1550, 700, 0
+    MouseMove 1620, 663, 0
     SendNativeMouseWheel(-1, 120)
     Sleep 700
 }
@@ -3838,11 +4218,11 @@ OpenSeoPromptSettingsGui() {
     settingsGui.AddText("xm", "SEO automation mode")
     controls["seoAutomationMode"] := settingsGui.AddDropDownList("xm y+4 w260", GetSeoAutomationModeOptions())
     controls["seoAutomationMode"].Choose(GetSeoAutomationModeOptionIndex(GetSeoAutomationMode()))
-    settingsGui.AddText("xm y+6 w700", "Department runs: matrix modes process Matrix Product rows; all other modes process Simple Product rows.")
+    settingsGui.AddText("xm y+6 w700", "Department runs: matrix modes process Matrix Product rows; promotion_text_reference runs its own catalogue-search batch.")
 
     controls["promotionTextLabel"] := settingsGui.AddText("xm y+14", "Promotional text")
     controls["promotionText"] := settingsGui.AddEdit("xm y+4 w700 r5", botzPromptSettings["promotionText"])
-    controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Used only by promotion_text mode. It is pasted into both the Description and Custom fields.")
+    controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Used by promotion_text and promotion_text_reference. It is pasted into both the Description and Custom fields.")
     controls["seoAutomationMode"].OnEvent("Change", UpdatePromotionTextSettingsControls.Bind(controls))
     UpdatePromotionTextSettingsControls(controls)
 
@@ -3884,6 +4264,7 @@ OpenSeoPromptSettingsGui() {
 
 SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
     global botzPromptSettings, departmentAutomationActive, automaticWorkflowActive
+    global promotionReferenceBatchActive
 
     settings := Map(
         "seoAutomationMode", StrLower(Trim(controls["seoAutomationMode"].Text)),
@@ -3900,7 +4281,7 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
 
     try {
         ValidateBotzPromptSettings(settings)
-        if (departmentAutomationActive || automaticWorkflowActive) && settings["seoAutomationMode"] != GetSeoAutomationMode()
+        if (departmentAutomationActive || automaticWorkflowActive || promotionReferenceBatchActive) && settings["seoAutomationMode"] != GetSeoAutomationMode()
             throw Error("SeoAutomationMode cannot be changed while an automatic workflow is active. Stop or finish the current run first.")
         SaveBotzPromptSettings(settings)
         botzPromptSettings := settings
@@ -3915,7 +4296,8 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
 }
 
 UpdatePromotionTextSettingsControls(controls, *) {
-    enabled := StrLower(Trim(controls["seoAutomationMode"].Text)) = "promotion_text"
+    selectedMode := StrLower(Trim(controls["seoAutomationMode"].Text))
+    enabled := selectedMode = "promotion_text" || selectedMode = "promotion_text_reference"
     controls["promotionTextLabel"].Enabled := enabled
     controls["promotionText"].Enabled := enabled
     controls["promotionTextHelp"].Enabled := enabled
@@ -3937,8 +4319,9 @@ ValidateBotzPromptSettings(settings) {
         throw Error("The testing-mode setting is missing.")
     if settings["testingModeEnabled"] != true && settings["testingModeEnabled"] != false
         throw Error("The testing-mode setting must be enabled or disabled.")
-    if settings["seoAutomationMode"] = "promotion_text" && Trim(settings["promotionText"], " `t`r`n") = ""
-        throw Error("Enter the promotional text before saving promotion_text mode.")
+    if (settings["seoAutomationMode"] = "promotion_text" || settings["seoAutomationMode"] = "promotion_text_reference")
+        && Trim(settings["promotionText"], " `t`r`n") = ""
+        throw Error("Enter the promotional text before saving a promotion-text mode.")
     if settings["pageUrl"] = ""
         throw Error("The Cromartie page URL cannot be blank.")
     if !IsBotzHttpUrl(settings["pageUrl"])
