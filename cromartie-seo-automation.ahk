@@ -1,4 +1,4 @@
-﻿#Requires AutoHotkey v2.0
+#Requires AutoHotkey v2.0
 #SingleInstance Force
 
 #Include "UIA-v2\Lib\UIA.ahk"
@@ -58,8 +58,12 @@ departmentChatgptWinTitle := "Tools"
 ; "promotion_text_reference" = find every Simple Product (Reference) on the
 ; current catalogue page, reopen each by stock-code search and paste the same text
 ; This is the fallback used by older settings files. Saving the
-; Ctrl+Shift+NumLock menu persists the selected mode across reloads.
+; Ctrl+Shift+NumLock menu persists the selected mode and its active prompt
+; across reloads.
 SeoAutomationMode := "full"
+; Prompt choices are scoped to their owning mode. The saved prompt ID is
+; validated against that mode before a template can be loaded.
+SeoPromptId := "full_standard"
 
 ; PROMOTION TEXT TEST-SAVE SWITCH: change false to true to click the main
 ; product Save button and allow promotion_text and promotion_text_reference runs.
@@ -67,6 +71,7 @@ promotionTextSaveEnabled := true
 
 promptDir := A_ScriptDir "\prompts"
 FullPromptTemplatePath := promptDir "\prompt-template.md"
+FullToolsPromptTemplatePath := promptDir "\prompt-template-tools-products.md"
 DepartmentPromptTemplatePath := promptDir "\prompt-template-department.md"
 MetadataPromptTemplatePath := promptDir "\prompt-template-metadata-only.md"
 ImageOnlyPromptTemplatePath := promptDir "\prompt-template-image-only.md"
@@ -74,7 +79,11 @@ MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
 MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
 ; BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
 BotzPromptTemplatePath := promptDir "\prompt-template-botz-engobes.md"
-FiguredArtPromptTemplatePath := promptDir "\prompt-template-figuredart.md"
+FiguredArtDefaultPromptTemplatePath := promptDir "\prompt-template-figuredart.md"
+; The supplier library reads this active path directly so it remains usable by
+; its standalone tests. ApplySharedSeoPromptSettings keeps it in sync with the
+; mode-scoped prompt selection.
+FiguredArtPromptTemplatePath := FiguredArtDefaultPromptTemplatePath
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
@@ -343,7 +352,7 @@ Esc:: ExitApp()
 ; ==========================================================
 
 TestScript() {
-    global useRecommendedProductName, SeoAutomationMode, imageCountToProcess
+    global useRecommendedProductName, SeoAutomationMode, SeoPromptId, imageCountToProcess
     global fullWorkflowAutomationEnabled, automaticWorkflowActive
     global departmentAutomationEnabled, departmentAutomationActive
     global departmentStopAfterCurrent, testingModeEnabled, testingSessionLogPath
@@ -369,6 +378,7 @@ TestScript() {
         savedMode := savedState["mode"]
     }
     MsgBox "SEO mode: " SeoAutomationMode
+        . "`nSEO prompt: " SeoPromptId " (" GetSeoPromptLabel(GetSeoAutomationMode(), GetSeoPromptId()) ")"
         . "`nImages: " imageCountToProcess
         . "`nRecommended product-name insertion: " nameMode
         . "`n" automationLabel " (Ctrl+Alt+A): " automationMode " (" automationStatus ")"
@@ -657,12 +667,14 @@ BuildPromptFromCurrentProductPage(pageUrl, forceAutomaticCompletion := false) {
 ; ==========================================================
 
 ValidateSeoAutomationMode() {
-    global SeoAutomationMode
+    global SeoAutomationMode, SeoPromptId
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
         throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'department', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text' or 'promotion_text_reference'.")
     }
+    if !IsValidSeoPromptForMode(mode, GetSeoPromptId())
+        throw Error("Invalid SEO prompt '" SeoPromptId "' for mode '" mode "'. Prompt choices cannot be shared across modes.")
 }
 
 GetSeoAutomationModeOptions() {
@@ -690,6 +702,93 @@ GetSeoAutomationModeOptionIndex(mode) {
 GetSeoAutomationMode() {
     global SeoAutomationMode
     return StrLower(Trim(SeoAutomationMode))
+}
+
+GetSeoPromptId() {
+    global SeoPromptId
+    return StrLower(Trim(SeoPromptId))
+}
+
+GetSeoPromptOptionsForMode(mode) {
+    global FullPromptTemplatePath, FullToolsPromptTemplatePath
+    global DepartmentPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath
+    global MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath
+    global BotzPromptTemplatePath, FiguredArtDefaultPromptTemplatePath
+
+    mode := StrLower(Trim(mode))
+    switch mode {
+        case "full":
+            return [
+                Map("id", "full_standard", "label", "Standard full product", "path", FullPromptTemplatePath),
+                Map("id", "full_tools_products", "label", "Tools product optimisation", "path", FullToolsPromptTemplatePath)
+            ]
+        case "department":
+            return [Map("id", "department_standard", "label", "Standard department", "path", DepartmentPromptTemplatePath)]
+        case "metadata":
+            return [Map("id", "metadata_standard", "label", "Standard metadata and images", "path", MetadataPromptTemplatePath)]
+        case "image":
+            return [Map("id", "image_standard", "label", "Standard image SEO", "path", ImageOnlyPromptTemplatePath)]
+        case "matrix_image":
+            return [Map("id", "matrix_image_standard", "label", "Standard matrix image SEO", "path", MatrixImagePromptTemplatePath)]
+        case "matrix_full":
+            return [Map("id", "matrix_full_standard", "label", "Standard matrix full", "path", MatrixFullPromptTemplatePath)]
+        case "botz":
+            return [Map("id", "botz_engobes", "label", "BOTZ engobes", "path", BotzPromptTemplatePath)]
+        case "figuredart":
+            return [Map("id", "figuredart_standard", "label", "Figured'Art product creation", "path", FiguredArtDefaultPromptTemplatePath)]
+        case "promotion_text", "promotion_text_reference":
+            return []
+    }
+    return []
+}
+
+GetDefaultSeoPromptId(mode) {
+    options := GetSeoPromptOptionsForMode(mode)
+    return options.Length ? options[1]["id"] : ""
+}
+
+GetSeoPromptOption(mode, promptId) {
+    promptId := StrLower(Trim(promptId))
+    for _, option in GetSeoPromptOptionsForMode(mode) {
+        if option["id"] = promptId
+            return option
+    }
+    return 0
+}
+
+IsValidSeoPromptForMode(mode, promptId) {
+    options := GetSeoPromptOptionsForMode(mode)
+    if options.Length = 0
+        return Trim(promptId) = ""
+    return IsObject(GetSeoPromptOption(mode, promptId))
+}
+
+GetSeoPromptLabelsForMode(mode) {
+    labels := []
+    for _, option in GetSeoPromptOptionsForMode(mode)
+        labels.Push(option["label"])
+    return labels
+}
+
+GetSeoPromptOptionIndex(mode, promptId) {
+    promptId := StrLower(Trim(promptId))
+    for index, option in GetSeoPromptOptionsForMode(mode) {
+        if option["id"] = promptId
+            return index
+    }
+    return 1
+}
+
+GetSeoPromptIdFromOptionIndex(mode, optionIndex) {
+    options := GetSeoPromptOptionsForMode(mode)
+    if optionIndex < 1 || optionIndex > options.Length
+        return ""
+    return options[optionIndex]["id"]
+}
+
+GetSeoPromptLabel(mode, promptId) {
+    option := GetSeoPromptOption(mode, promptId)
+    return IsObject(option) ? option["label"] : "Not used by this mode"
 }
 
 GetChatGptWinTitle() {
@@ -771,29 +870,11 @@ GetDepartmentProductTypeForSeoMode(mode := "") {
 }
 
 GetPromptTemplatePath() {
-    global FullPromptTemplatePath, DepartmentPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath, BotzPromptTemplatePath, FiguredArtPromptTemplatePath
-
     ValidateSeoAutomationMode()
-
-    if IsMetadataOnlyMode()
-        return MetadataPromptTemplatePath
-
-    if IsDepartmentMode()
-        return DepartmentPromptTemplatePath
-
-    if IsImageOnlyMode()
-        return ImageOnlyPromptTemplatePath
-
-    if IsMatrixImageMode()
-        return MatrixImagePromptTemplatePath
-    if IsMatrixFullMode()
-        return MatrixFullPromptTemplatePath
-    if IsBotzMode()
-        return BotzPromptTemplatePath
-    if IsFiguredArtMode()
-        return FiguredArtPromptTemplatePath
-
-    return FullPromptTemplatePath
+    option := GetSeoPromptOption(GetSeoAutomationMode(), GetSeoPromptId())
+    if !IsObject(option) || option["path"] = ""
+        throw Error("Mode '" GetSeoAutomationMode() "' does not have a usable prompt template selected.")
+    return option["path"]
 }
 
 ReadPromptTemplateFile(templatePath) {
@@ -4275,11 +4356,14 @@ InitialiseSeoPromptSettings() {
 }
 
 ApplySharedSeoPromptSettings(settings) {
-    global SeoAutomationMode, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault, promotionText
-    global testingModeEnabled
+    global SeoAutomationMode, SeoPromptId, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault, promotionText
+    global testingModeEnabled, FiguredArtPromptTemplatePath, FiguredArtDefaultPromptTemplatePath
 
     testingWasEnabled := testingModeEnabled
     SeoAutomationMode := settings["seoAutomationMode"]
+    SeoPromptId := settings["seoPromptId"]
+    figuredArtOption := GetSeoPromptOption("figuredart", SeoAutomationMode = "figuredart" ? SeoPromptId : GetDefaultSeoPromptId("figuredart"))
+    FiguredArtPromptTemplatePath := IsObject(figuredArtOption) ? figuredArtOption["path"] : FiguredArtDefaultPromptTemplatePath
     hardcodedPageUrl := settings["pageUrl"]
     requiredInternalLinksDefault := BuildBotzRecommendedInlinks(settings)
     additionalProductNotesDefault := settings["additionalNotes"] != "" ? settings["additionalNotes"] : "NONE"
@@ -4305,6 +4389,7 @@ CreateDefaultBotzPromptSettings() {
 
     return Map(
         "seoAutomationMode", GetSeoAutomationMode(),
+        "seoPromptId", GetDefaultSeoPromptId(GetSeoAutomationMode()),
         "pageUrl", botzDefaultPageUrl,
         "inlink1Name", "",
         "inlink1Url", "",
@@ -4343,11 +4428,23 @@ OpenSeoPromptSettingsGui() {
     controls["seoAutomationMode"].Choose(GetSeoAutomationModeOptionIndex(GetSeoAutomationMode()))
     settingsGui.AddText("xm y+6 w700", "Department runs: matrix modes process Matrix Product rows; promotion_text_reference runs its own catalogue-search batch.")
 
+    controls["seoPromptLabel"] := settingsGui.AddText("xm y+14", "Prompt")
+    initialPromptLabels := GetSeoPromptLabelsForMode(GetSeoAutomationMode())
+    if initialPromptLabels.Length = 0
+        initialPromptLabels := ["Not used by this mode"]
+    controls["seoPrompt"] := settingsGui.AddDropDownList("xm y+4 w360", initialPromptLabels)
+    controls["seoPrompt"].Choose(GetSeoPromptOptionsForMode(GetSeoAutomationMode()).Length
+        ? GetSeoPromptOptionIndex(GetSeoAutomationMode(), botzPromptSettings["seoPromptId"])
+        : 1)
+    controls["seoPromptHelp"] := settingsGui.AddText("xm y+4 w700", "Only prompts registered to the selected mode are available.")
+    controls["promptSelections"] := Map(GetSeoAutomationMode(), botzPromptSettings["seoPromptId"])
+
     controls["promotionTextLabel"] := settingsGui.AddText("xm y+14", "Promotional text")
     controls["promotionText"] := settingsGui.AddEdit("xm y+4 w700 r5", botzPromptSettings["promotionText"])
     controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Used by promotion_text and promotion_text_reference. It is pasted into both the Description and Custom fields.")
-    controls["seoAutomationMode"].OnEvent("Change", UpdatePromotionTextSettingsControls.Bind(controls))
-    UpdatePromotionTextSettingsControls(controls)
+    controls["seoAutomationMode"].OnEvent("Change", UpdateSeoPromptSettingsControls.Bind(controls))
+    controls["seoPrompt"].OnEvent("Change", RememberSeoPromptSelection.Bind(controls))
+    UpdateSeoPromptSettingsControls(controls)
 
     controls["testingModeEnabled"] := settingsGui.AddCheckBox("xm y+14 w700", "Testing mode (save detailed diagnostics for future debugging)")
     controls["testingModeEnabled"].Value := botzPromptSettings["testingModeEnabled"] ? 1 : 0
@@ -4391,6 +4488,7 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
 
     settings := Map(
         "seoAutomationMode", StrLower(Trim(controls["seoAutomationMode"].Text)),
+        "seoPromptId", GetSeoPromptIdFromOptionIndex(StrLower(Trim(controls["seoAutomationMode"].Text)), controls["seoPrompt"].Value),
         "pageUrl", Trim(controls["pageUrl"].Value),
         "inlink1Name", Trim(controls["inlink1Name"].Value),
         "inlink1Url", Trim(controls["inlink1Url"].Value),
@@ -4404,26 +4502,53 @@ SaveSeoPromptSettingsFromGui(settingsGui, controls, *) {
 
     try {
         ValidateBotzPromptSettings(settings)
-        if (departmentAutomationActive || automaticWorkflowActive || promotionReferenceBatchActive) && settings["seoAutomationMode"] != GetSeoAutomationMode()
-            throw Error("SeoAutomationMode cannot be changed while an automatic workflow is active. Stop or finish the current run first.")
+        if (departmentAutomationActive || automaticWorkflowActive || promotionReferenceBatchActive)
+            && (settings["seoAutomationMode"] != GetSeoAutomationMode() || settings["seoPromptId"] != GetSeoPromptId())
+            throw Error("The SEO mode or prompt cannot be changed while an automatic workflow is active. Stop or finish the current run first.")
         SaveBotzPromptSettings(settings)
         botzPromptSettings := settings
         ApplySharedSeoPromptSettings(settings)
         CloseSeoPromptSettingsGui(settingsGui)
         testingStatus := settings["testingModeEnabled"] ? "ON" : "OFF"
-        Flash("SEO prompt settings saved.`nMode: " settings["seoAutomationMode"] "`nTesting mode: " testingStatus, 2500)
+        Flash("SEO prompt settings saved.`nMode: " settings["seoAutomationMode"] "`nPrompt: " GetSeoPromptLabel(settings["seoAutomationMode"], settings["seoPromptId"]) "`nTesting mode: " testingStatus, 2500)
     } catch as err {
         ReportTestingError("save-seo-prompt-settings", err, false)
         MsgBox "SEO prompt settings were not saved.`n`n" err.Message
     }
 }
 
-UpdatePromotionTextSettingsControls(controls, *) {
+UpdateSeoPromptSettingsControls(controls, *) {
     selectedMode := StrLower(Trim(controls["seoAutomationMode"].Text))
+    selectedPromptId := controls["promptSelections"].Has(selectedMode)
+        ? controls["promptSelections"][selectedMode]
+        : GetDefaultSeoPromptId(selectedMode)
+    labels := GetSeoPromptLabelsForMode(selectedMode)
+
+    controls["seoPrompt"].Delete()
+    if labels.Length {
+        controls["seoPrompt"].Add(labels)
+        controls["seoPrompt"].Choose(GetSeoPromptOptionIndex(selectedMode, selectedPromptId))
+        controls["seoPrompt"].Enabled := true
+        controls["seoPromptHelp"].Text := "Only prompts registered to " selectedMode " mode are available."
+        RememberSeoPromptSelection(controls)
+    } else {
+        controls["seoPrompt"].Add(["Not used by this mode"])
+        controls["seoPrompt"].Choose(1)
+        controls["seoPrompt"].Enabled := false
+        controls["seoPromptHelp"].Text := "This mode performs no ChatGPT prompt step."
+        controls["promptSelections"][selectedMode] := ""
+    }
+
     enabled := selectedMode = "promotion_text" || selectedMode = "promotion_text_reference"
     controls["promotionTextLabel"].Enabled := enabled
     controls["promotionText"].Enabled := enabled
     controls["promotionTextHelp"].Enabled := enabled
+}
+
+RememberSeoPromptSelection(controls, *) {
+    selectedMode := StrLower(Trim(controls["seoAutomationMode"].Text))
+    promptId := GetSeoPromptIdFromOptionIndex(selectedMode, controls["seoPrompt"].Value)
+    controls["promptSelections"][selectedMode] := promptId
 }
 
 CloseSeoPromptSettingsGui(settingsGui, *) {
@@ -4436,6 +4561,10 @@ CloseSeoPromptSettingsGui(settingsGui, *) {
 ValidateBotzPromptSettings(settings) {
     if !settings.Has("seoAutomationMode") || !IsValidSeoAutomationMode(settings["seoAutomationMode"])
         throw Error("Select a valid SEO automation mode.")
+    if !settings.Has("seoPromptId")
+        throw Error("The SEO prompt setting is missing.")
+    if !IsValidSeoPromptForMode(settings["seoAutomationMode"], settings["seoPromptId"])
+        throw Error("Select a prompt that belongs to the selected SEO automation mode.")
     if !settings.Has("promotionText")
         throw Error("The promotion-text setting is missing.")
     if !settings.Has("testingModeEnabled")
@@ -4472,6 +4601,7 @@ SaveBotzPromptSettings(settings) {
     EnsureFolders()
     text := "CROMARTIE_BOTZ_PROMPT_SETTINGS_V1`n"
     text .= "seo_automation_mode`t" EncodeStateValue(settings["seoAutomationMode"]) "`n"
+    text .= "seo_prompt_id`t" EncodeStateValue(settings["seoPromptId"]) "`n"
     text .= "page_url`t" EncodeStateValue(settings["pageUrl"]) "`n"
     text .= "inlink_1_name`t" EncodeStateValue(settings["inlink1Name"]) "`n"
     text .= "inlink_1_url`t" EncodeStateValue(settings["inlink1Url"]) "`n"
@@ -4540,6 +4670,11 @@ LoadBotzPromptSettings() {
     settings["seoAutomationMode"] := values.Has("seo_automation_mode")
         ? StrLower(Trim(values["seo_automation_mode"]))
         : GetSeoAutomationMode()
+    ; Settings saved before prompt selection existed use that mode's first
+    ; registered prompt, preserving every previous workflow by default.
+    settings["seoPromptId"] := values.Has("seo_prompt_id")
+        ? StrLower(Trim(values["seo_prompt_id"]))
+        : GetDefaultSeoPromptId(settings["seoAutomationMode"])
     ValidateBotzPromptSettings(settings)
     return settings
 }
@@ -4569,7 +4704,7 @@ BuildBotzRecommendedInlinks(settings) {
 ; ==========================================================
 
 BuildBotzPrompt(pageUrl) {
-    global cmsWinTitle, BotzPromptTemplatePath, botzState, botzPromptSettings, maximumImagesPerProduct
+    global cmsWinTitle, botzState, botzPromptSettings, maximumImagesPerProduct
 
     try {
         ClearActiveCmsProductCode()
@@ -4601,12 +4736,13 @@ BuildBotzPrompt(pageUrl) {
         imageFiles := TakeFirstBotzImageFiles(attachmentImageFiles, maximumImagesPerProduct)
         imageManifest := BuildBotzImageManifest(imageFiles)
 
-        if !FileExist(BotzPromptTemplatePath)
-            throw Error("The BOTZ prompt template was not found: " BotzPromptTemplatePath)
+        promptTemplatePath := GetPromptTemplatePath()
+        if !FileExist(promptTemplatePath)
+            throw Error("The selected BOTZ prompt template was not found: " promptTemplatePath)
         if !IsObject(botzPromptSettings)
             InitialiseSeoPromptSettings()
         prompt := BuildBotzPromptFromSource(
-            FileRead(BotzPromptTemplatePath, "UTF-8"),
+            FileRead(promptTemplatePath, "UTF-8"),
             pageUrl,
             productName,
             productMd,
@@ -5654,7 +5790,7 @@ ValidateMatrixFullHtml(html, productIndex) {
 ; ==========================================================
 
 BuildMatrixImagePrompt(pageUrl) {
-    global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixState, MatrixImagePromptTemplatePath
+    global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixState
     global additionalProductNotesDefault, activeMatrixParentProductName
     ValidateImageTargetConfig()
     ClearActiveCmsProductCode()
@@ -5709,7 +5845,10 @@ BuildMatrixImagePrompt(pageUrl) {
     }
     matrixState := Map("mode", "matrix_image", "parentProductName", parentName, "productCount", productCount, "parentImageCount", parentImageCount, "products", products)
     SaveMatrixState(matrixState)
-    prompt := BuildMatrixPromptFromState(FileRead(MatrixImagePromptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, firstHtml, matrixState)
+    promptTemplatePath := GetPromptTemplatePath()
+    if !FileExist(promptTemplatePath)
+        throw Error("The selected matrix-image prompt template was not found: " promptTemplatePath)
+    prompt := BuildMatrixPromptFromState(FileRead(promptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, firstHtml, matrixState)
     LogText("matrix_image-parent-context", "Parent: " parentName "`nURL: " pageUrl "`nChildren: " productCount "`nParent images: " parentImageCount "`nTotal images: " GetMatrixTotalImageCount(matrixState))
     LogText("matrix_image-prompt", prompt)
     PastePromptToChatGPT(prompt)
@@ -5749,7 +5888,7 @@ BuildMatrixPromptFromState(template, pageUrl, metaTitle, metaDescription, firstH
 
 BuildMatrixFullPrompt(pageUrl) {
     global cmsWinTitle, chatgptWinTitle, imageCountToProcess, matrixFullState
-    global MatrixFullPromptTemplatePath, activeMatrixParentProductName
+    global activeMatrixParentProductName
     ValidateImageTargetConfig()
     ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
@@ -5805,7 +5944,10 @@ BuildMatrixFullPrompt(pageUrl) {
 
     matrixFullState := Map("mode", "matrix_full", "parentProductName", parentName, "productCount", productCount, "parentImageCount", parentImageCount, "products", products)
     SaveMatrixState(matrixFullState)
-    prompt := BuildMatrixFullPromptFromState(FileRead(MatrixFullPromptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, matrixFullState)
+    promptTemplatePath := GetPromptTemplatePath()
+    if !FileExist(promptTemplatePath)
+        throw Error("The selected matrix-full prompt template was not found: " promptTemplatePath)
+    prompt := BuildMatrixFullPromptFromState(FileRead(promptTemplatePath, "UTF-8"), pageUrl, parentTitle, parentDescription, matrixFullState)
     LogText("matrix_full-parent-context", "Parent: " parentName "`nURL: " pageUrl "`nMeta title: " parentTitle "`nMeta description: " parentDescription "`nChildren: " productCount "`nParent images: " parentImageCount "`nTotal images: " GetMatrixTotalImageCount(matrixFullState))
     LogText("matrix_full-prompt", prompt)
     PastePromptToChatGPT(prompt)
