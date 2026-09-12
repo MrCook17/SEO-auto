@@ -37,12 +37,17 @@ CoordMode "Mouse", "Screen"
 cmsWinTitle := "GOb2b Admin - Cromartie Hobbycraft Limited - Catalogue Manager - Google Chrome"
 ; chatgptWinTitle := "Colour & Glaze - SEO Metadata Creation - Google Chrome"
 ; chatgptWinTitle := "Colour & Glaze - Product SEO Metadata Setup - Google Chrome"
-chatgptWinTitle := "Colour & Glaze"
+; chatgptWinTitle := "Colour & Glaze"
+chatgptWinTitle := "Tools"
+departmentChatgptWinTitle := "Tools"
 ; chatgptWinTitle := "Arts & Crafts"
 ; chatgptWinTitle := "Opt"
 
 ; Available modes:
 ; "full" = current existing workflow
+; "department" = full-content review workflow using the separate department prompt;
+; Ctrl+Alt+A optionally makes Numpad4 submit and complete automatically;
+; the main product always remains unsaved for review
 ; "metadata" = metadata and image SEO
 ; "image" = image SEO for one ordinary product
 ; "matrix_image" = image SEO for every child of one matrix product
@@ -62,6 +67,7 @@ promotionTextSaveEnabled := true
 
 promptDir := A_ScriptDir "\prompts"
 FullPromptTemplatePath := promptDir "\prompt-template.md"
+DepartmentPromptTemplatePath := promptDir "\prompt-template-department.md"
 MetadataPromptTemplatePath := promptDir "\prompt-template-metadata-only.md"
 ImageOnlyPromptTemplatePath := promptDir "\prompt-template-image-only.md"
 MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
@@ -161,6 +167,8 @@ imageGalleryPreviousPageDelayMs := 300
 imageGalleryPageChangeTimeoutMs := 5000
 imageGalleryFirstPageNoChangeTimeoutMs := 2000
 imageGalleryAvailabilityTimeoutMs := 15000
+; Give Chrome a brief render window after opening Images before the first UIA read.
+imageAccessibilityTreeInitialDelayMs := 2000
 imageGalleryCountTimeoutMs := 20000
 imageGalleryCountStableDurationMs := 2000
 ; A later carousel page can remain absent from UIA indefinitely until it is
@@ -341,6 +349,9 @@ TestScript() {
     global departmentStopAfterCurrent, testingModeEnabled, testingSessionLogPath
     nameMode := useRecommendedProductName ? "ON" : "OFF"
     automationMode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
+    automationLabel := IsDepartmentMode()
+        ? "Department Numpad4 + Numpad6 automation"
+        : "Full workflow automation"
     automationStatus := automaticWorkflowActive
         ? (departmentAutomationActive ? "active inside department run" : "currently waiting/running")
         : "idle"
@@ -360,7 +371,7 @@ TestScript() {
     MsgBox "SEO mode: " SeoAutomationMode
         . "`nImages: " imageCountToProcess
         . "`nRecommended product-name insertion: " nameMode
-        . "`nFull workflow automation (Ctrl+Alt+A): " automationMode " (" automationStatus ")"
+        . "`n" automationLabel " (Ctrl+Alt+A): " automationMode " (" automationStatus ")"
         . "`nDepartment automation (Ctrl+Alt+D): " departmentMode " (" departmentStatus ")"
         . "`nTesting diagnostics: " testingStatus
         . "`nTesting session log: " testingLog
@@ -391,10 +402,15 @@ ToggleFullWorkflowAutomation() {
     if !fullWorkflowAutomationEnabled && !departmentAutomationActive
         automaticWorkflowCancelRequested := true
     mode := fullWorkflowAutomationEnabled ? "ON" : "OFF"
-    message := "Full workflow automation: " mode
+    message := (IsDepartmentMode() ? "Department Numpad4 + Numpad6 automation: " : "Full workflow automation: ") mode
     if !fullWorkflowAutomationEnabled && departmentAutomationActive
         message .= "`nThe active department run is unaffected; use Ctrl+Numpad6 to stop it after the current product."
-    else if !fullWorkflowAutomationEnabled
+    else if IsDepartmentMode() {
+        if fullWorkflowAutomationEnabled
+            message .= "`nNumpad4 will submit, wait and insert the result automatically. The product will remain unsaved."
+        else
+            message .= "`nNumpad4 will prepare the prompt and images only. Press Numpad6 manually when the response is ready."
+    } else if !fullWorkflowAutomationEnabled
         message .= "`nAny active ChatGPT wait will stop safely."
     Flash(message, 2500)
 }
@@ -402,6 +418,11 @@ ToggleFullWorkflowAutomation() {
 ToggleDepartmentAutomation() {
     global departmentAutomationEnabled, departmentAutomationActive
     global departmentStopAfterCurrent
+    if IsDepartmentMode() {
+        departmentAutomationEnabled := false
+        Flash("Department-wide automation is unavailable in department review mode.`nOpen one product and press Numpad4 instead.", 3500)
+        return
+    }
     departmentAutomationEnabled := !departmentAutomationEnabled
     if !departmentAutomationEnabled && departmentAutomationActive
         departmentStopAfterCurrent := true
@@ -534,7 +555,7 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
     else if IsMatrixImageMode()
         BuildMatrixImagePrompt(pageUrl)
     else
-        BuildPromptFromCurrentProductPage(pageUrl)
+        BuildPromptFromCurrentProductPage(pageUrl, forceAutomaticCompletion)
     return RunAutomaticWorkflowIfEnabled(IsSupplierProductCreationMode(), forceAutomaticCompletion)
 }
 
@@ -542,20 +563,26 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
 ; BUILD PROMPT FROM CURRENT PRODUCT PAGE
 ; ==========================================================
 
-BuildPromptFromCurrentProductPage(pageUrl) {
+BuildPromptFromCurrentProductPage(pageUrl, forceAutomaticCompletion := false) {
     global cmsWinTitle, chatgptWinTitle, SeoAutomationMode
     global requiredInternalLinksDefault, additionalProductNotesDefault
     global attemptImageCopyAfterPrompt, imageCountToProcess
 
     ValidateSeoAutomationMode()
+    if IsDepartmentMode()
+        imageCountToProcess := 1
     ClearActiveCmsProductCode()
     ActivateWindow(cmsWinTitle)
     ValidateImageTargetConfig()
 
-    ; Overview tab: exact GO b2b identity and product name
+    ; Overview tab: exact GO b2b identity and product name. Department review
+    ; mode intentionally identifies the product by name and never reads Stock Code.
     ClickPoint("overview_tab", 500)
-    SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     productName := CopyFromPoint("product_name")
+    if IsDepartmentMode()
+        SetActiveCmsProductCode(productName)
+    else
+        SetActiveCmsProductCode(CopyFromPoint("stock_code"))
     TestingLog(
         "product-workflow-start",
         "Product name=" productName "; mode=" GetSeoAutomationMode() "; page_url=" pageUrl "."
@@ -578,9 +605,15 @@ BuildPromptFromCurrentProductPage(pageUrl) {
     LogText("original-fields", originalFields)
     BackupText("original-fields", originalFields)
 
-    ; Count actual gallery cards from their exact Remove buttons. Image labels
-    ; are deliberately ignored because GO B2B can skip label numbers.
-    DetectAndSetImageCountFromImagesTab()
+    ; Department review products always have one image, so avoid reading the GO
+    ; b2b gallery tree and use the configured first-image coordinates instead.
+    if IsDepartmentMode()
+        TestingLog("department-image-count", "Using fixed image count=1 and configured coordinates; gallery UIA detection was skipped.")
+    else {
+        ; Count actual gallery cards from their exact Remove buttons. Image labels
+        ; are deliberately ignored because GO B2B can skip label numbers.
+        DetectAndSetImageCountFromImagesTab()
+    }
 
     templatePath := GetPromptTemplatePath()
 
@@ -610,8 +643,8 @@ BuildPromptFromCurrentProductPage(pageUrl) {
 
     if attemptImageCopyAfterPrompt {
         imagesReady := TryCopyCmsImagesToChatGPT(false)
-        if IsAutomaticWorkflowExecutionEnabled() && !imagesReady
-            throw Error("Full workflow automation stopped before sending because one or more CMS images could not be pasted into ChatGPT.")
+        if (IsAutomaticWorkflowExecutionEnabled() || forceAutomaticCompletion) && !imagesReady
+            throw Error("Automatic workflow stopped before sending because one or more CMS images could not be pasted into ChatGPT.")
         Flash("Prompt pasted. Image copy attempted.")
         return
     }
@@ -628,12 +661,12 @@ ValidateSeoAutomationMode() {
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text' or 'promotion_text_reference'.")
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'department', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text' or 'promotion_text_reference'.")
     }
 }
 
 GetSeoAutomationModeOptions() {
-    return ["full", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text", "promotion_text_reference"]
+    return ["full", "department", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text", "promotion_text_reference"]
 }
 
 IsValidSeoAutomationMode(mode) {
@@ -659,8 +692,21 @@ GetSeoAutomationMode() {
     return StrLower(Trim(SeoAutomationMode))
 }
 
+GetChatGptWinTitle() {
+    global chatgptWinTitle, departmentChatgptWinTitle
+    return IsDepartmentMode() ? departmentChatgptWinTitle : chatgptWinTitle
+}
+
 IsFullMode() {
     return GetSeoAutomationMode() = "full"
+}
+
+IsDepartmentMode() {
+    return GetSeoAutomationMode() = "department"
+}
+
+IsFullContentMode() {
+    return IsFullMode() || IsDepartmentMode()
 }
 
 IsMetadataOnlyMode() {
@@ -725,12 +771,15 @@ GetDepartmentProductTypeForSeoMode(mode := "") {
 }
 
 GetPromptTemplatePath() {
-    global FullPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath, BotzPromptTemplatePath, FiguredArtPromptTemplatePath
+    global FullPromptTemplatePath, DepartmentPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath, MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath, BotzPromptTemplatePath, FiguredArtPromptTemplatePath
 
     ValidateSeoAutomationMode()
 
     if IsMetadataOnlyMode()
         return MetadataPromptTemplatePath
+
+    if IsDepartmentMode()
+        return DepartmentPromptTemplatePath
 
     if IsImageOnlyMode()
         return ImageOnlyPromptTemplatePath
@@ -840,7 +889,7 @@ PastePromptToChatGPT(prompt) {
 
     Loop chatPasteRetries {
         try {
-            ActivateWindow(chatgptWinTitle, 900)
+            ActivateWindow(GetChatGptWinTitle(), 900)
             FocusChatGptInputForPaste()
             PasteLargeTextToFocusedInput(prompt)
             Flash("Prompt pasted.")
@@ -1038,7 +1087,7 @@ TryCopyCmsImagesToChatGPT(showResult := true) {
         ; The prompt can appear in ChatGPT as one draft file tile. Measure the
         ; current draft first, then verify that each image adds exactly one more
         ; attachment instead of waiting a long fixed delay after every Ctrl+V.
-        ActivateWindow(chatgptWinTitle, chatImageWindowWakeDelayMs)
+        ActivateWindow(GetChatGptWinTitle(), chatImageWindowWakeDelayMs)
         attachmentBaseline := GetChatGptDraftAttachmentCount()
         TestingLog("chatgpt-attachment-baseline", "Draft attachment count before CMS images: " attachmentBaseline ".")
 
@@ -1105,7 +1154,7 @@ TryCopyCmsSingleImageToChatGPT(imageIndex := 1, showResult := true, sequentialGa
             return false
         }
 
-        ActivateWindow(chatgptWinTitle, chatImageWindowWakeDelayMs)
+        ActivateWindow(GetChatGptWinTitle(), chatImageWindowWakeDelayMs)
         FocusChatGptInputForImagePaste()
         Send "^v"
         if expectedChatAttachmentCount >= 0 {
@@ -1140,10 +1189,29 @@ PrepareCmsImageGalleryForSequentialCopy() {
 
     startedAt := A_TickCount
     ActivateWindow(cmsWinTitle, 100)
+    if IsDepartmentMode() {
+        OpenDepartmentImageGalleryByCoordinates("image-copy")
+        TestingLog(
+            "image-gallery-sequential-ready",
+            "Department mode opened the one-image gallery by configured coordinates; UIA gallery discovery was skipped."
+        )
+        return
+    }
     OpenFirstImageGalleryPage()
     TestingLog(
         "image-gallery-sequential-ready",
         "Gallery prepared on page 1 for sequential image copying; elapsed_ms=" (A_TickCount - startedAt) "."
+    )
+}
+
+OpenDepartmentImageGalleryByCoordinates(context := "department-image") {
+    global cmsWinTitle, imageTabLoadDelayMs
+
+    ActivateWindow(cmsWinTitle, 100)
+    ClickPoint("images_tab", imageTabLoadDelayMs)
+    TestingLog(
+        "department-image-gallery-coordinate-open",
+        "Context=" context "; fixed image count=1; Images tab opened through configured coordinates."
     )
 }
 
@@ -1263,12 +1331,15 @@ GetImageGalleryPageForIndex(imageIndex) {
 }
 
 OpenFirstImageGalleryPage() {
-    global imageTabLoadDelayMs, imageGalleryMaxPages
+    global imageTabLoadDelayMs, imageGalleryMaxPages, imageAccessibilityTreeInitialDelayMs
 
     ; GO b2b preserves the current gallery page when the Images tab is clicked.
     ; Wait adaptively for the tab's UIA subtree before attempting pagination,
     ; then walk backwards until Previous no longer changes the page.
     ClickPoint("images_tab", imageTabLoadDelayMs)
+    ToolTip "Waiting for the Images tab to settle before reading its accessibility tree..."
+    TestingLog("image-gallery-pre-uia-delay", "Delay_ms=" imageAccessibilityTreeInitialDelayMs ".")
+    Sleep imageAccessibilityTreeInitialDelayMs
     WaitForImageGalleryAvailable()
     Loop imageGalleryMaxPages {
         if !TryReturnToPreviousImageGalleryPage()
@@ -1791,10 +1862,14 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
         ActivateWindow(cmsWinTitle)
         ClearActiveCmsProductCode()
         ClickPoint("overview_tab", 500)
-        currentProductCode := SetActiveCmsProductCode(CopyFromPoint("stock_code"))
         completedProductName := CleanText(CopyFromPoint("product_name"))
         if completedProductName = ""
             throw Error("The current GO b2b Product Name is blank, so the completed product cannot be identified safely.")
+        if IsDepartmentMode() {
+            SetActiveCmsProductCode(completedProductName)
+            currentProductCode := ""
+        } else
+            currentProductCode := SetActiveCmsProductCode(CopyFromPoint("stock_code"))
         response := A_Clipboard
 
         if !InStr(response, "===AUTOMATION_OUTPUT_START===") {
@@ -1830,7 +1905,7 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
 
         ; The strict image-only parser has already validated every required image
         ; field; metadata is intentionally absent in this mode.
-        warnings := IsImageOnlyMode() ? "" : ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, IsFullMode())
+        warnings := IsImageOnlyMode() ? "" : ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, IsFullContentMode())
 
         if warnings != "" {
             MsgBox "Warnings found. No fields were pasted.`n`n" warnings
@@ -1867,7 +1942,9 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
             ClickPoint("product_save_button", 1000)
         }
 
-        if IsFullMode()
+        if IsDepartmentMode()
+            Flash("SEO fields pasted. Review the product, then save it manually.", 3000)
+        else if IsFullMode()
             Flash("SEO fields pasted and product saved.")
         else if IsMetadataOnlyMode()
             Flash("Metadata and image SEO fields pasted and product saved.")
@@ -1930,13 +2007,19 @@ AutomaticWorkflowMayContinue(forceAutomation := false) {
 
 AutomaticWorkflowStatusHeading() {
     global departmentAutomationActive
-    return departmentAutomationActive ? "DEPARTMENT AUTOMATION RUNNING" : "FULL WORKFLOW AUTOMATION ON"
+    if departmentAutomationActive
+        return "DEPARTMENT AUTOMATION RUNNING"
+    if IsDepartmentMode()
+        return "DEPARTMENT MODE AUTOMATION"
+    return "FULL WORKFLOW AUTOMATION ON"
 }
 
 AutomaticWorkflowControlHint() {
     global departmentAutomationActive
     if departmentAutomationActive
         return "`nCtrl+Numpad6: stop after the current product`nNumpad6: manual output fallback"
+    if IsDepartmentMode()
+        return "`nCtrl+Alt+A: turn this automation off`nNumpad6: use the manual output fallback now"
     return "`nCtrl+Alt+A: turn automation off`nNumpad6: use the manual fallback now"
 }
 
@@ -1944,7 +2027,7 @@ SubmitChatGptDraftForAutomaticWorkflow(forceAutomation := false) {
     global chatgptWinTitle, chatImageWindowWakeDelayMs, chatSubmitPreEnterDelayMs
     ToolTip AutomaticWorkflowStatusHeading()
         . "`nWaiting " Round(chatSubmitPreEnterDelayMs / 1000, 1) " seconds before submitting the prepared ChatGPT request..."
-    ActivateWindow(chatgptWinTitle, chatImageWindowWakeDelayMs)
+    ActivateWindow(GetChatGptWinTitle(), chatImageWindowWakeDelayMs)
     ; The prompt and any images were just pasted into this existing draft, so
     ; keep it untouched for a full ten seconds before the final Enter. This lets
     ; ChatGPT finish materialising large prompts and draft attachments.
@@ -2047,6 +2130,10 @@ StartDepartmentAutomation() {
     global promotionTextSaveEnabled
 
     ValidateSeoAutomationMode()
+    if IsDepartmentMode() {
+        MsgBox "The department SEO mode deliberately leaves each product unsaved for review, so it cannot run as a department-wide batch.`n`nOpen one product and press Numpad4 instead. The prompt will be submitted and the response inserted automatically, then the product will remain open for you to review and save manually."
+        return false
+    }
     if IsPromotionTextReferenceMode() {
         MsgBox "promotion_text_reference has its own stock-code search batch.`n`nOpen the catalogue product list and press NumpadEnter or Numpad4. Department automation does not need to be enabled."
         return false
@@ -2714,7 +2801,7 @@ TryCopyLatestChatGptResponseWithUia(&problem) {
     problem := ""
 
     try {
-        ActivateWindow(chatgptWinTitle, 400)
+        ActivateWindow(GetChatGptWinTitle(), 400)
         document := UIA_Browser().GetCurrentDocumentElement()
         copyButton := FindLatestChatGptResponseCopyButton(document)
         if !copyButton {
@@ -2766,7 +2853,7 @@ TryCopyLatestChatGptResponseByCoordinates(&problem) {
     problem := ""
 
     try {
-        ActivateWindow(chatgptWinTitle, 400)
+        ActivateWindow(GetChatGptWinTitle(), 400)
         MouseMove chatResponseCopyButtonPoint[1], chatResponseCopyButtonPoint[2], 0
 
         ; Moving up first repairs the occasional ChatGPT conversation viewport
@@ -3269,7 +3356,7 @@ InsertMetaFields(metaTitle, metaDescription, htmlSnippet := "") {
     ClickPoint("description_tab", 600)
     PasteToPoint("meta_title", metaTitle)
 
-    if IsFullMode() || IsSupplierProductCreationMode()
+    if IsFullContentMode() || IsSupplierProductCreationMode()
         PasteToPoint("html_snippet", htmlSnippet)
 
     PasteToPoint("meta_description", metaDescription)
@@ -3282,7 +3369,7 @@ InsertImageSeoFields(imageTitles, imageAlts, imageNames := 0) {
         imageName := imageNames && imageNames.Length >= A_Index ? imageNames[A_Index] : ""
         PasteImageMetadataToCms(A_Index, imageTitles[A_Index], imageAlts[A_Index], imageName)
     }
-    if imageTitles.Length
+    if imageTitles.Length && !IsDepartmentMode()
         SaveTestingAccessibilityTree("cms-after-" imageTitles.Length "-image-metadata-records")
 }
 
@@ -3294,6 +3381,17 @@ BeginSequentialImageMetadataInsertion(imageCount) {
     if imageCount < 1
         return
 
+    if IsDepartmentMode() {
+        if imageCount != 1
+            throw Error("Department mode expects exactly one image metadata record; received " imageCount ".")
+        OpenDepartmentImageGalleryByCoordinates("image-metadata")
+        TestingLog(
+            "cms-image-metadata-start",
+            "Department mode opened its single image gallery by configured coordinates; UIA gallery discovery was skipped."
+        )
+        return
+    }
+
     ; Use verified UIA page changes here as well as during image copying. Blind
     ; Previous clicks could leave the metadata run on the wrong carousel page.
     OpenFirstImageGalleryPage()
@@ -3304,7 +3402,7 @@ BeginSequentialImageMetadataInsertion(imageCount) {
 }
 
 PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt, imageName := "") {
-    global imageGalleryPageSize
+    global imageGalleryPageSize, cmsImageGalleryReturnSettleMs
 
     ; Image cards are ordered left-to-right in groups of five. Image 6, 11,
     ; 16, etc. moves to the next page and reuses the first configured slot.
@@ -3334,10 +3432,19 @@ PasteImageMetadataToCms(imageIndex, imageTitle, imageAlt, imageName := "") {
     ; GO B2B requires this Image Save button to leave the image details page.
     ; This does not click the main product Save button.
     ClickPoint("image_save_button", 250)
-    WaitForCmsImageGalleryAfterDetailsSave(imageIndex)
+    if IsDepartmentMode() {
+        Sleep cmsImageGalleryReturnSettleMs
+        TestingLog(
+            "cms-image-gallery-return-coordinate-mode",
+            "Department mode skipped the post-save gallery accessibility-tree verification for its single image."
+        )
+    } else
+        WaitForCmsImageGalleryAfterDetailsSave(imageIndex)
     TestingLog(
         "cms-image-metadata-saved",
-        "Image " imageIndex " detail record was populated, saved, and the Image Gallery return was verified."
+        IsDepartmentMode()
+            ? "Image 1 detail record was populated and saved; department coordinate mode used a fixed return delay."
+            : "Image " imageIndex " detail record was populated, saved, and the Image Gallery return was verified."
     )
 }
 
@@ -3348,27 +3455,39 @@ OpenCmsImageDetailsForMetadata(imageIndex) {
     slotIndex := Mod(imageIndex - 1, imageGalleryPageSize) + 1
     Loop cmsImageDetailsOpenAttempts {
         attempt := A_Index
-        buttonInfo := WaitForVisibleImageGalleryDetailsButton(slotIndex, cmsImageDetailsButtonTimeoutMs)
-        if buttonInfo {
-            TestingLog(
-                "cms-image-details-open-attempt",
-                "Image=" imageIndex "; attempt=" attempt "; slot=" slotIndex
-                . "; source=UIA; x=" buttonInfo["x"] "; y=" buttonInfo["y"] "."
-            )
-            ; Use a physical click at the live UIA rectangle. This preserves the
-            ; proven browser interaction while avoiding stale fixed coordinates.
-            Click buttonInfo["x"], buttonInfo["y"]
-        } else {
-            ; Retain the configured screen point only as a compatibility fallback
-            ; if Chrome temporarily declines to expose visible Details buttons.
-            target := GetImageTarget(imageIndex)
+        if IsDepartmentMode() {
+            if imageIndex != 1
+                throw Error("Department mode can open only its configured first image; received image " imageIndex ".")
+            target := GetImageTarget(1)
             point := target["details_button"]
             TestingLog(
                 "cms-image-details-open-attempt",
-                "Image=" imageIndex "; attempt=" attempt "; slot=" slotIndex
-                . "; source=configured-fallback; x=" point[1] "; y=" point[2] "."
+                "Image=1; attempt=" attempt "; slot=1; source=department-configured-coordinate; x=" point[1] "; y=" point[2] "."
             )
             Click point[1], point[2]
+        } else {
+            buttonInfo := WaitForVisibleImageGalleryDetailsButton(slotIndex, cmsImageDetailsButtonTimeoutMs)
+            if buttonInfo {
+                TestingLog(
+                    "cms-image-details-open-attempt",
+                    "Image=" imageIndex "; attempt=" attempt "; slot=" slotIndex
+                    . "; source=UIA; x=" buttonInfo["x"] "; y=" buttonInfo["y"] "."
+                )
+                ; Use a physical click at the live UIA rectangle. This preserves the
+                ; proven browser interaction while avoiding stale fixed coordinates.
+                Click buttonInfo["x"], buttonInfo["y"]
+            } else {
+                ; Retain the configured screen point only as a compatibility fallback
+                ; if Chrome temporarily declines to expose visible Details buttons.
+                target := GetImageTarget(imageIndex)
+                point := target["details_button"]
+                TestingLog(
+                    "cms-image-details-open-attempt",
+                    "Image=" imageIndex "; attempt=" attempt "; slot=" slotIndex
+                    . "; source=configured-fallback; x=" point[1] "; y=" point[2] "."
+                )
+                Click point[1], point[2]
+            }
         }
 
         if WaitForCmsImageDetailsFormReady(cmsImageDetailsFormTimeoutMs) {
@@ -3380,11 +3499,15 @@ OpenCmsImageDetailsForMetadata(imageIndex) {
             "cms-image-details-open-miss",
             "Image=" imageIndex "; attempt=" attempt "; the Title and Alt edit controls did not appear."
         )
-        SaveTestingAccessibilityTree("cms-image-" imageIndex "-details-open-attempt-" attempt "-failed")
+        if !IsDepartmentMode()
+            SaveTestingAccessibilityTree("cms-image-" imageIndex "-details-open-attempt-" attempt "-failed")
         if attempt < cmsImageDetailsOpenAttempts {
             ; Rebuild the exact page from a verified page 1 before retrying. This
             ; handles a Save transition swallowing the first Details click.
-            OpenImageGalleryPageForIndex(imageIndex)
+            if IsDepartmentMode()
+                OpenDepartmentImageGalleryByCoordinates("image-metadata-retry")
+            else
+                OpenImageGalleryPageForIndex(imageIndex)
         }
     }
 
@@ -4007,7 +4130,7 @@ BuildTestingRuntimeSummary() {
         . "`nFull workflow automation enabled: " (fullWorkflowAutomationEnabled ? "yes" : "no")
         . "`nDepartment automation enabled: " (departmentAutomationEnabled ? "yes" : "no")
         . "`nCMS window match: " cmsWinTitle
-        . "`nChatGPT window match: " chatgptWinTitle
+        . "`nChatGPT window match: " GetChatGptWinTitle()
         . "`n" GetTestingActiveWindowSummary()
         . "`nCoordinates:"
     for name, point in coords
@@ -4745,7 +4868,7 @@ ValidateBotzCtrlAImageFolder(imagesDir, imageFiles, supplierName := "BOTZ") {
 
 OpenChatGptFilePicker() {
     global chatgptWinTitle, botzFilePickerTimeoutMs
-    ActivateWindow(chatgptWinTitle, 500)
+    ActivateWindow(GetChatGptWinTitle(), 500)
     ClickPoint("chat_add_button", 900)
     ClickPoint("chat_add_attachments_button", 700)
     picker := WinWaitActive("ahk_class #32770", , botzFilePickerTimeoutMs / 1000)
@@ -4857,7 +4980,7 @@ WaitForBotzChatAttachmentBatch(imageFiles, supplierName := "BOTZ") {
 SubmitBotzChatGptDraft(supplierName := "BOTZ", logPrefix := "botz") {
     global chatgptWinTitle, botzChatAttachmentSettleMs, chatSubmitPreEnterDelayMs
     ToolTip supplierName " attachments settled. Waiting " Round(chatSubmitPreEnterDelayMs / 1000, 1) " seconds before sending..."
-    ActivateWindow(chatgptWinTitle, 300)
+    ActivateWindow(GetChatGptWinTitle(), 300)
     FocusChatGptInputForPaste()
     TestingLog("chatgpt-pre-submit-wait", "Delay_ms=" chatSubmitPreEnterDelayMs "; workflow=" logPrefix "; supplier=" supplierName ".")
     Sleep chatSubmitPreEnterDelayMs
@@ -5590,7 +5713,7 @@ BuildMatrixImagePrompt(pageUrl) {
     LogText("matrix_image-parent-context", "Parent: " parentName "`nURL: " pageUrl "`nChildren: " productCount "`nParent images: " parentImageCount "`nTotal images: " GetMatrixTotalImageCount(matrixState))
     LogText("matrix_image-prompt", prompt)
     PastePromptToChatGPT(prompt)
-    ActivateWindow(chatgptWinTitle)
+    ActivateWindow(GetChatGptWinTitle())
     FocusChatGptInputForPaste()
     Flash("Matrix prompt and attachments are ready for manual review.", 3000)
 }
@@ -5687,7 +5810,7 @@ BuildMatrixFullPrompt(pageUrl) {
     LogText("matrix_full-prompt", prompt)
     PastePromptToChatGPT(prompt)
 
-    ActivateWindow(chatgptWinTitle)
+    ActivateWindow(GetChatGptWinTitle())
     FocusChatGptInputForPaste()
     Flash("Matrix-full prompt and attachments are ready for manual review.", 3000)
 }
