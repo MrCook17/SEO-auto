@@ -231,7 +231,7 @@ chatImageAttachmentTimeoutMs := 5000
 chatImageAttachmentPollIntervalMs := 150
 chatImageAttachmentSettleMs := 400
 chatImagePasteFallbackDelayMs := 1000
-chatSubmitPreEnterDelayMs := 30000
+chatSubmitPreEnterDelayMs := 10000
 cmsImageDetailsButtonTimeoutMs := 5000
 cmsImageDetailsFormTimeoutMs := 5000
 cmsImageDetailsOpenAttempts := 2
@@ -2110,7 +2110,7 @@ SubmitChatGptDraftForAutomaticWorkflow(forceAutomation := false) {
         . "`nWaiting " Round(chatSubmitPreEnterDelayMs / 1000, 1) " seconds before submitting the prepared ChatGPT request..."
     ActivateWindow(GetChatGptWinTitle(), chatImageWindowWakeDelayMs)
     ; The prompt and any images were just pasted into this existing draft, so
-    ; keep it untouched for a full ten seconds before the final Enter. This lets
+    ; keep it untouched for ten seconds before the final Enter. This lets
     ; ChatGPT finish materialising large prompts and draft attachments.
     FocusChatGptInputForImagePaste()
     if !AutomaticWorkflowMayContinue(forceAutomation)
@@ -2424,28 +2424,34 @@ CollectDepartmentCatalogueProducts(document, departmentProductType := "") {
         if !InStr(StrLower(listItem.ClassName), "cms-catalogue-tile")
             continue
         rowText := listItem.Name
-        rowProductType := GetCatalogueTileProductTypePrefix(rowText)
-        ; Filter the broad product class before attempting to parse its full
-        ; identity. Reference-only Matrix SKU tiles deliberately have no Edit
-        ; suffix/control, but matrix department runs only need Matrix Product
-        ; parents and must not abort when these non-target rows are present.
-        if departmentProductType != ""
-            && rowProductType != ""
-            && StrLower(rowProductType) != StrLower(departmentProductType) {
-            if IsCatalogueReferenceMatrixSkuTile(rowText)
-                TestingLog("catalogue-reference-sku-skipped", NormaliseCatalogueTileText(rowText))
+        ; Child-department links share the product tile class. Reference
+        ; departments have no Edit suffix, so skip them by their type prefix.
+        if IsCatalogueDepartmentTile(rowText)
+            continue
+        ; Reference links are handled by their own catalogue-search workflow.
+        ; They can share the selected product type but have no Edit control.
+        if IsCatalogueReferenceTile(rowText) {
+            TestingLog("catalogue-reference-tile-skipped", NormaliseCatalogueTileText(rowText))
             continue
         }
+        rowProductType := GetCatalogueTileProductTypePrefix(rowText)
+        ; Only ordinary products of the selected type participate in the
+        ; ordering. Keep strict parsing for those rows before opening one.
+        if rowProductType = "" {
+            TestingLog("catalogue-other-tile-skipped", NormaliseCatalogueTileText(rowText))
+            continue
+        }
+        if departmentProductType != "" && StrLower(rowProductType) != StrLower(departmentProductType)
+            continue
 
         identity := ParseDepartmentCatalogueTileIdentity(rowText)
         if !identity {
-            ; A catalogue list can contain links to child departments alongside
-            ; its actual products. They use the same cms-catalogue-tile class,
-            ; but must not participate in product ordering or next-product
-            ; selection. BOTZ lists did not expose these structural rows, which
-            ; is why the same department loop worked there.
-            if IsCatalogueDepartmentTile(rowText)
+            ; GO b2b also marks reference links with a dedicated child class.
+            ; Use it when the accessible name has an unfamiliar format.
+            if HasCatalogueReferenceMarker(listItem) {
+                TestingLog("catalogue-reference-tile-skipped", NormaliseCatalogueTileText(rowText))
                 continue
+            }
             throw Error("A catalogue product tile could not be parsed safely: " rowText)
         }
         ; Department runs operate on one product class only. Matrix modes use
@@ -2476,14 +2482,20 @@ GetCatalogueTileProductTypePrefix(rowText) {
     return ""
 }
 
-IsCatalogueReferenceMatrixSkuTile(rowText) {
+IsCatalogueReferenceTile(rowText) {
     text := NormaliseCatalogueTileText(rowText)
-    return RegExMatch(text, "i)^Matrix SKU\s+(?:\(Reference\)|Reference)\b")
+    return RegExMatch(text, "i)^(?:Simple Product|Matrix SKU|Matrix Product)\s+\(Reference\)(?:\s|$)") || RegExMatch(text, "i)^Matrix SKU\s+Reference(?:\s|$)")
+}
+
+HasCatalogueReferenceMarker(listItem) {
+    try return listItem.FindElements({ ClassName: "cms-catalogue-tile-reference" }).Length > 0
+    catch
+        return false
 }
 
 IsCatalogueDepartmentTile(rowText) {
     text := NormaliseCatalogueTileText(rowText)
-    return RegExMatch(text, "i)^Department\s+.+\s+Edit$")
+    return RegExMatch(text, "i)^Department\s+\S")
 }
 
 ParseDepartmentCatalogueTileIdentity(rowText) {
@@ -3028,13 +3040,11 @@ ParseAutomationOutput(block, imageCount, metadataOnly := false) {
 ; ==========================================================
 
 RunPromotionTextReferenceWorkflow() {
-    global cmsWinTitle, promotionText, promotionTextSaveEnabled
+    global cmsWinTitle, promotionTextSaveEnabled
     global promotionReferenceBatchActive, promotionReferenceStopAfterCurrent
     global promotionReferenceCatalogueReturnDelayMs
     global departmentAutomationActive, automaticWorkflowActive
 
-    if Trim(promotionText, " `t`r`n") = ""
-        throw Error("Promotional text is blank. Enter it in Ctrl+Shift+NumLock and save the settings first.")
     if !promotionTextSaveEnabled
         throw Error("promotion_text_reference cannot run while promotionTextSaveEnabled is false, because every saved product must return to the catalogue before the next stock-code search.")
     if promotionReferenceBatchActive
@@ -3374,8 +3384,7 @@ RunPromotionTextWorkflow() {
     global lastSavedNonMatrixProductIdentity
 
     textToPaste := Trim(promotionText, " `t`r`n")
-    if textToPaste = ""
-        throw Error("Promotional text is blank. Enter it in Ctrl+Shift+NumLock and save the settings first.")
+    fieldAction := textToPaste = "" ? "cleared" : "filled"
 
     ActivateWindow(cmsWinTitle)
     ClearActiveCmsProductCode()
@@ -3402,6 +3411,7 @@ RunPromotionTextWorkflow() {
         "Product name: " completedProductName
         . "`nProduct code: " currentProductCode
         . "`nSave enabled: " (promotionTextSaveEnabled ? "yes" : "no")
+        . "`nField action: " fieldAction
         . "`n`nPromotional text:`n" textToPaste
     )
 
@@ -3411,9 +3421,9 @@ RunPromotionTextWorkflow() {
             "productCode", currentProductCode
         )
         ClickPoint("product_save_button", 1000)
-        Flash("Promotional text pasted into Description and Custom, then the product was saved.", 3000)
+        Flash("Description and Custom promotional fields " fieldAction ", then the product was saved.", 3000)
     } else {
-        Flash("Promotional text pasted into Description and Custom.`nTEST MODE: the product was not saved.", 3500)
+        Flash("Description and Custom promotional fields " fieldAction ".`nTEST MODE: the product was not saved.", 3500)
     }
     return true
 }
@@ -3936,8 +3946,7 @@ NormalisePastedFieldValue(value) {
 PasteText(text) {
     savedClip := ClipboardAll()
 
-    ; If a generated value is intentionally blank and the user continued past
-    ; the validation warning, clear the selected CMS field without failing.
+    ; An intentionally blank value clears the selected CMS field.
     if text = "" {
         Send "{Backspace}"
         Sleep 250
@@ -4441,7 +4450,7 @@ OpenSeoPromptSettingsGui() {
 
     controls["promotionTextLabel"] := settingsGui.AddText("xm y+14", "Promotional text")
     controls["promotionText"] := settingsGui.AddEdit("xm y+4 w700 r5", botzPromptSettings["promotionText"])
-    controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Used by promotion_text and promotion_text_reference. It is pasted into both the Description and Custom fields.")
+    controls["promotionTextHelp"] := settingsGui.AddText("xm y+4 w700", "Leave empty to clear Description and Custom promotional fields in either promotion mode.")
     controls["seoAutomationMode"].OnEvent("Change", UpdateSeoPromptSettingsControls.Bind(controls))
     controls["seoPrompt"].OnEvent("Change", RememberSeoPromptSelection.Bind(controls))
     UpdateSeoPromptSettingsControls(controls)
@@ -4571,9 +4580,6 @@ ValidateBotzPromptSettings(settings) {
         throw Error("The testing-mode setting is missing.")
     if settings["testingModeEnabled"] != true && settings["testingModeEnabled"] != false
         throw Error("The testing-mode setting must be enabled or disabled.")
-    if (settings["seoAutomationMode"] = "promotion_text" || settings["seoAutomationMode"] = "promotion_text_reference")
-        && Trim(settings["promotionText"], " `t`r`n") = ""
-        throw Error("Enter the promotional text before saving a promotion-text mode.")
     if settings["pageUrl"] = ""
         throw Error("The Cromartie page URL cannot be blank.")
     if !IsBotzHttpUrl(settings["pageUrl"])
@@ -5114,14 +5120,14 @@ WaitForBotzChatAttachmentBatch(imageFiles, supplierName := "BOTZ") {
 }
 
 SubmitBotzChatGptDraft(supplierName := "BOTZ", logPrefix := "botz") {
-    global chatgptWinTitle, botzChatAttachmentSettleMs, chatSubmitPreEnterDelayMs
-    ToolTip supplierName " attachments settled. Waiting " Round(chatSubmitPreEnterDelayMs / 1000, 1) " seconds before sending..."
+    global chatgptWinTitle, botzChatAttachmentSettleMs
+    ; WaitForBotzChatAttachmentBatch supplies the full ten-second period for
+    ; the draft to finish loading its images.
+    ToolTip supplierName " attachments settled. Sending the prepared request..."
     ActivateWindow(GetChatGptWinTitle(), 300)
     FocusChatGptInputForPaste()
-    TestingLog("chatgpt-pre-submit-wait", "Delay_ms=" chatSubmitPreEnterDelayMs "; workflow=" logPrefix "; supplier=" supplierName ".")
-    Sleep chatSubmitPreEnterDelayMs
-    FocusChatGptInputForPaste()
-    LogText(logPrefix "-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second " supplierName " attachment timer plus a " Round(chatSubmitPreEnterDelayMs / 1000, 1) "-second draft-settle wait.")
+    TestingLog("chatgpt-pre-submit-wait", "Delay_ms=0; attachment_settle_ms=" botzChatAttachmentSettleMs "; workflow=" logPrefix "; supplier=" supplierName ".")
+    LogText(logPrefix "-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second " supplierName " attachment timer.")
     Send "{Enter}"
 }
 

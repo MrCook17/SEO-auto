@@ -26,6 +26,25 @@ Read these every time before writing:
 - `cromartie_tools_product_page_seo_guidance_workbook.xlsx`
 - `cromartie_tools_product_page_seo_guidance_workbook_usage_guide.md`
 
+### Product content and customer-usefulness authority
+
+- `cromartie_pottery_tools_product_page_optimisation_rules.md`
+
+Read this document **in full every time before drafting the response**, even when the product appears simple.
+
+It is the source of truth for:
+
+- deciding how much content the product actually needs
+- customer usefulness and practical-use coverage
+- purpose-led H2s
+- whether a specification table is justified
+- pottery-stage and application wording
+- recognised alternative terminology
+- avoiding circular explanations, filler and repeated CMS information
+- keeping secondary uses secondary
+
+Do not rely only on the shortened rules in this prompt. Use the full document as additional context before returning any product optimisation.
+
 ### CMS styling authority
 
 - `cromartie_flexible_cms_styling_guidance_updated.md`
@@ -38,7 +57,7 @@ The CMS styling guide is the **source of truth for HTML structure and formatting
 
 ## SEO
 
-```text id="tc5l3z"
+```text
 Tools Department Workbook
 ↓
 Tools Product Workbook
@@ -54,7 +73,7 @@ Never make an individual product compete with its parent department for the broa
 
 ## Facts
 
-```text id="9qfvpm"
+```text
 Current supplied product information
 ↓
 Additional verified notes
@@ -65,6 +84,16 @@ SEO guidance
 ```
 
 SEO keywords do not prove product specifications.
+
+## Content structure and usefulness
+
+The `cromartie_pottery_tools_product_page_optimisation_rules.md` document governs content depth, customer usefulness, H2 purpose, specification-table decisions, terminology, ambiguity and when concise copy is preferable.
+
+If an example elsewhere in this prompt conflicts with that document on those points, follow the product optimisation rules document.
+
+The CMS styling guide remains the authority for HTML structure and formatting.
+
+The automation input/output contract in this prompt must still be followed exactly.
 
 ---
 
@@ -84,6 +113,7 @@ Before writing:
 8. Check relevant `SERP Analysis`.
 9. Check `Internal Linking`.
 10. Check `Review Queue` where applicable.
+11. Read `cromartie_pottery_tools_product_page_optimisation_rules.md` in full and classify the product's required content depth before drafting.
 
 Use:
 
@@ -118,14 +148,16 @@ Current meta description:
 
 Current HTML/product description snippet:
 
-```html id="s84hvn"
+```html
 {{CURRENT_HTML_SNIPPET}}
 ```
 
 Recommended internal links:
 
 ===RECOMMENDED_INLINKS_START===
+
 {{REQUIRED_INTERNAL_LINKS}}
+
 ===RECOMMENDED_INLINKS_END===
 
 Image notes:
@@ -135,7 +167,9 @@ Image notes:
 Additional notes:
 
 ===ADDITIONAL_NOTES_START===
+
 {{ADDITIONAL_PRODUCT_NOTES}}
+
 ===ADDITIONAL_NOTES_END===
 
 ---
@@ -156,15 +190,19 @@ Create:
 
 Optimise the **exact tool being sold**.
 
-The page should clearly explain:
+The page should clearly explain, where the verified information genuinely supports it:
 
 - what the product is
 - its practical job
-- its strongest verified differentiator
-- how that differentiator affects its use
+- when or at what pottery stage it is used, where relevant and verified
+- its strongest useful verified differentiator
+- how that differentiator affects use or selection **only when that relationship is supported**
 - useful buying or selection context
 - important verified specifications
+- important limitations or compatibility information
 - how it differs from nearby alternatives where supported
+
+Do not force every point into every product. A simple tool with sparse verified information may only need a clear purpose-led H2 and one or two useful paragraphs.
 
 Useful differentiators may include verified:
 
@@ -238,25 +276,30 @@ A good description should answer:
 
 Use factual information to explain **purpose and practical value**, not merely repeat specifications.
 
-### Good style example
+### Core writing test
 
-A strong paragraph might read like:
+Every sentence should do at least one useful job:
 
-> The Foam Backed Abrasive Scrubber 150 Grit is designed for cleaning, smoothing and refining clay pieces. Its abrasive surface can be used to remove excess slip, glaze or clay build-up, while the foam-backed format distinguishes it from standard pottery sponges and stipplers.
+- explain what the tool helps the customer do
+- clarify when or how it is used
+- explain a verified selection difference
+- provide a useful verified specification
+- state a relevant limitation or compatibility point
+- introduce recognised terminology that helps the customer identify the tool
 
-This works because it:
+Avoid circular wording.
 
-- immediately explains what the product does
-- gives several genuine uses
-- explains the significance of the product format
-- differentiates it from nearby alternatives
-- uses natural sentences rather than a list of SEO phrases
+Weak:
 
-A useful second paragraph can then add another supported use, limitation, pack detail or selection point:
+> The 150 grit grade clearly identifies this as the 150 grit version.
 
-> The scrubber can also be used on wood where a 150 grit abrasive is required. Priced individually.
+Better, **only where the practical relationship is verified**:
 
-Do **not** copy this wording onto unrelated products. Match this level of usefulness and specificity.
+> The 150 grit abrasive surface is intended for smoothing and refining the relevant surface by hand.
+
+Do not describe a feature's supposed benefit merely because the feature exists. If the practical significance is not verified, state the feature once and move on.
+
+Do not automatically repeat pack quantity, price-per-item or other information already made clear by the CMS. Repeat it only when it prevents genuine purchasing confusion.
 
 ---
 
@@ -287,9 +330,11 @@ Use for useful additional context such as:
 - how this version differs from another type
 - selection guidance
 - size/material/profile relevance
-- pack quantity
+- relevant pottery stage or working condition
+- recognised alternative terminology
 - compatibility
 - practical limitation
+- pack quantity only where it prevents confusion or materially affects the buying decision
 
 Do not force two paragraphs when the available facts only support one strong paragraph.
 
@@ -303,7 +348,7 @@ Use `cromartie_flexible_cms_styling_guidance_updated.md` as the styling authorit
 
 Start with:
 
-```html id="w9fmpm"
+```html
 <div
   style="font-family: Open Sans, sans-serif; font-size:15px; line-height:1.7; color:#444;"
 ></div>
@@ -319,7 +364,7 @@ Do not include:
 - `<style>`
 - `<h1>`
 
-Use one useful product-led `<h2>` with the exact styling from the CMS guide.
+Use one useful **purpose-led** `<h2>` with the exact styling from the CMS guide. It should normally explain the job, use or application rather than restating the product name.
 
 ---
 
@@ -331,19 +376,19 @@ Normal product copy should normally be plain `<p>` text.
 
 Do not write things like:
 
-```html id="dtjtuc"
+```html
 <p><strong>Perfect for:</strong> smoothing pottery...</p>
 ```
 
 or:
 
-```html id="n4bs6h"
+```html
 <p><b>Key benefit:</b> helps remove excess clay...</p>
 ```
 
 Instead write natural prose:
 
-```html id="xkb11w"
+```html
 <p>
   This abrasive scrubber can be used to smooth clay surfaces and remove excess
   material before finishing.
@@ -352,7 +397,7 @@ Instead write natural prose:
 
 Use `<strong>` only where the CMS styling guide specifically supports it, such as a genuine short note:
 
-```html id="1adkf6"
+```html
 <p style="margin-top:10px; font-size:0.95rem; color:#555;">
   <strong>Note:</strong> [important verified note]
 </p>
@@ -364,21 +409,23 @@ Do not use bold formatting as a substitute for good sentence structure.
 
 # H2
 
-Use one descriptive product-led H2.
+Use one descriptive **purpose-led** H2.
 
-It should add context rather than merely repeating the exact product name.
+The H1/product name already answers **what is it?**
 
-For example:
+The H2 should normally answer **what is it useful for?**
 
-```html id="u4s4he"
-<h2
-  style="color:#76689A; font-size:1.7em; font-weight:bold; margin-bottom:12px;"
->
-  150 Grit Foam Backed Abrasive Scrubber for Clay Finishing
-</h2>
-```
+Good patterns include:
 
-Only include facts verified for the actual product.
+- `For Smoothing and Surface Clean-Up`
+- `For Trimming and Shaping Clay`
+- `For Applying and Controlling Glaze`
+- `For Fine Detail and Decorative Work`
+- `For Cutting and Working Clay`
+
+Only include uses verified for the actual product.
+
+Do not create a second keyword-heavy version of the product title.
 
 Avoid headings such as:
 
@@ -410,11 +457,17 @@ Do not duplicate paragraph or table information in a list.
 
 # Specification table
 
-Use the Cromartie purple specification table from the styling guide when **useful structured specifications are available**.
+A specification table is **optional, not mandatory**.
 
-Potential rows include:
+Use the Cromartie purple specification table from the styling guide only when structured facts genuinely help the customer understand, compare or select the product.
 
-- Product type
+As a general guideline, use a table when there are **at least three useful independently verified specifications**. This is not an absolute rule:
+
+- two rows may justify a table if both are especially important to selection
+- four or more rows may still not justify a table if they merely repeat obvious information
+
+Potential useful rows include:
+
 - Size
 - Dimensions
 - Material
@@ -423,17 +476,23 @@ Potential rows include:
 - Model/range
 - Capacity
 - Measurement range
-- Pack quantity
 - Compatibility
+- Tool type where it adds useful clarification
+- Pack quantity where it materially affects selection or prevents confusion
+
+Do not create a table merely because other Cromartie products have one.
+
+Do not create filler rows.
+
+Do not repeat information already obvious from the product name or prominently displayed by the CMS unless repeating it genuinely improves purchasing clarity.
 
 Only include facts actually supplied or verified.
 
-Do not add filler rows.
+The prose should explain **why or when the product is useful**.
 
-The specification table should support the prose, not replace it.
+The table should make **meaningful structured facts easy to check**.
 
-The prose should explain **why the product is useful**.
-The table should make **structured facts easy to check**.
+If there are too few useful verified specifications, omit the table and keep the page clean.
 
 ---
 
@@ -470,7 +529,81 @@ unless supported.
 
 Do not invent safety, care, maintenance or cleaning advice.
 
+Do not infer an unverified pottery stage, working condition or suitability such as wet clay, leather-hard clay, greenware, bisque, glazed ware or fired ceramic.
+
+Avoid ambiguous claims such as `removes glaze`, `for finishing pottery` or `suitable for ceramics` when the verified source supports a more precise description.
+
+Where the stage or condition is verified, state it clearly.
+
+Do not invent the practical benefit of a material, shape, grit, mechanism or other attribute. Explain its significance only when supported or objectively established by the supplied information.
+
 If source information is sparse, keep the copy concise.
+
+---
+
+# Product complexity and content depth
+
+Classify the product before drafting.
+
+## Level 1 — Minimal
+
+Use for very simple products with little verified information.
+
+Typical output:
+
+- purpose-led H2
+- one or two concise useful paragraphs
+- no specification table unless genuinely justified
+
+## Level 2 — Standard
+
+Use when several useful verified facts or selection points are available.
+
+Typical output:
+
+- purpose-led H2
+- two or three concise paragraphs
+- specification table if it adds real value
+- relevant compatibility, stage or selection information where supported
+
+## Level 3 — Detailed
+
+Use when the product is technical or incorrect selection is plausible.
+
+Typical output:
+
+- fuller practical explanation
+- useful specification table
+- selection or compatibility guidance
+- verified limitations
+
+## Level 4 — Technical Equipment
+
+Use for complex or high-value equipment where technical specifications, setup, compatibility or safety materially affect purchase.
+
+Do not make a simple inexpensive hand tool look artificially complex merely to match the structure of a technical product.
+
+---
+
+# Recognised terminology, repetition and secondary uses
+
+Use genuine alternative pottery terminology naturally where it helps recognition or search understanding.
+
+Do not stack synonyms or repeat them for keyword density.
+
+Avoid circular explanations that merely restate an attribute.
+
+Do not automatically repeat CMS information such as pack size, price per item or stock status.
+
+Keep valid non-pottery uses secondary to the main pottery application.
+
+Do not add generic closing boilerplate such as:
+
+- A useful addition to any pottery studio.
+- Ideal for beginners and professionals.
+- A must-have tool for ceramic artists.
+
+Finish the description when the useful information is complete.
 
 ---
 
@@ -479,7 +612,9 @@ If source information is sparse, keep the copy concise.
 Use only the manually supplied links where useful:
 
 ===RECOMMENDED_INLINKS_START===
+
 {{REQUIRED_INTERNAL_LINKS}}
+
 ===RECOMMENDED_INLINKS_END===
 
 Rules:
@@ -511,7 +646,7 @@ Improve:
 
 Do not rewrite accurate useful content simply to make it sound different.
 
-The finished description should be **more informative and engaging**, not merely longer.
+The finished description should be **more useful, clear and natural**, not merely longer.
 
 ---
 
@@ -546,16 +681,25 @@ Do not:
 
 Before responding verify:
 
+- `cromartie_pottery_tools_product_page_optimisation_rules.md` was read in full
 - correct Product ID / Parent Department / Cluster used
 - product keyword does not steal parent ownership
 - sibling cannibalisation considered
-- useful verified differentiator used
+- product complexity/content depth is appropriate
+- useful verified differentiator used where one genuinely exists
 - no invented facts or SEO metrics
 - paragraphs explain practical customer value
+- relevant pottery stage or working condition is precise where verified
+- no ambiguous use claim has been made more specific than the evidence supports
+- H2 is purpose-led rather than a rewritten product title
+- recognised terminology is used naturally, not stuffed
+- copy contains no circular or obvious filler
+- CMS information is not repeated without a reason
 - copy is not dry or specification-only
 - paragraphs do not contain unnecessary `<strong>` or `<b>`
 - HTML follows the CMS styling guide
-- lists/tables are used only where useful
+- lists are used only where useful
+- a specification table is used only when it adds genuine purchasing value
 - no duplicated paragraph/list/table information
 - links have `title` attributes
 - image metadata is accurate
@@ -584,7 +728,7 @@ Only return these visible sections before the automation block:
 - Keyword ownership followed:
 - Cannibalisation avoided by:
 - Internal links used:
-- Product specification table used:
+- Product specification table used: [Yes/No + brief reason]
 - Content facts used:
 - Any uncertainty:
 
@@ -612,7 +756,7 @@ META_DESCRIPTION:
 
 HTML_SNIPPET:
 
-```html id="xzi4n5"
+```html
 [exact CMS-ready HTML snippet only]
 ```
 
