@@ -16,6 +16,9 @@
 #Include "Core\Diagnostics.ahk"
 #Include "Core\Settings.ahk"
 #Include "UI\SettingsGui.ahk"
+#Include "Browser\Interaction.ahk"
+#Include "Browser\ChatGPT.ahk"
+#Include "Browser\FileTransfers.ahk"
 
 SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
@@ -673,11 +676,6 @@ BuildPromptFromCurrentProductPage(pageUrl, forceAutomaticCompletion := false) {
 ; MODE AND PROMPT TEMPLATE HELPERS
 ; ==========================================================
 
-GetChatGptWinTitle() {
-    global chatgptWinTitle, departmentChatgptWinTitle
-    return IsDepartmentMode() ? departmentChatgptWinTitle : chatgptWinTitle
-}
-
 BuildSupplierProductCreationPrompt(pageUrl) {
     if IsBotzMode()
         return BuildBotzPrompt(pageUrl)
@@ -694,191 +692,10 @@ BuildSupplierProductCreationPrompt(pageUrl) {
 ; RELIABLE CHATGPT PROMPT PASTE
 ; ==========================================================
 
-PastePromptToChatGPT(prompt) {
-    global chatgptWinTitle, chatPasteRetries
-
-    lastProblem := ""
-
-    Loop chatPasteRetries {
-        try {
-            ActivateWindow(GetChatGptWinTitle(), 900)
-            FocusChatGptInputForPaste()
-            PasteLargeTextToFocusedInput(prompt)
-            Flash("Prompt pasted.")
-            return true
-        } catch as err {
-            lastProblem := err.Message
-            Sleep 700
-        }
-    }
-
-    throw Error("Prompt did not paste into ChatGPT after " chatPasteRetries " attempts.`n`n" lastProblem)
-}
-
-FocusChatGptInputForPaste() {
-    global chatWakeDelayMs
-
-    ; First click wakes the Chrome/ChatGPT tab if it has been inactive.
-    ClickPoint("chat_input", chatWakeDelayMs)
-    Sleep 250
-
-    ; Second click focuses the message box after the page is awake.
-    ClickPoint("chat_input", 500)
-    Sleep 300
-}
-
 ; Backwards-compatible wrapper retained for older/manual callers.
-WakeChatGptInput() {
-    FocusChatGptInputForPaste()
-}
-
-FocusChatGptInputForImagePaste() {
-    global chatImageFocusDelayMs
-
-    ; During an image batch ChatGPT is already awake and the draft already
-    ; exists, so one short focus click is sufficient. The slower two-click wake
-    ; sequence remains in place for the initial large prompt paste.
-    ClickPoint("chat_input", chatImageFocusDelayMs)
-    Sleep 100
-}
-
-GetChatGptDraftAttachmentCount() {
-    try {
-        document := UIA_Browser().GetCurrentDocumentElement()
-        buttons := document.FindElements({ Name: "Remove file", Type: "Button", mm: 2, cs: 0 })
-        count := 0
-        for _, button in buttons {
-            try {
-                if RegExMatch(Trim(button.Name), "i)^Remove file\s+\d+:")
-                    count += 1
-            }
-        }
-        return count
-    } catch as err {
-        TestingLog("chatgpt-attachment-count-error", FormatTestingError(err))
-        return -1
-    }
-}
-
-WaitForChatGptDraftAttachmentCount(expectedCount) {
-    global chatImageAttachmentTimeoutMs, chatImageAttachmentPollIntervalMs, chatImageAttachmentSettleMs
-
-    startedAt := A_TickCount
-    deadline := startedAt + chatImageAttachmentTimeoutMs
-    lastCount := -1
-    Loop {
-        count := GetChatGptDraftAttachmentCount()
-        if count != lastCount {
-            TestingLog(
-                "chatgpt-attachment-count",
-                "Expected=" expectedCount "; detected=" count "; elapsed_ms=" (A_TickCount - startedAt) "."
-            )
-            lastCount := count
-        }
-        if count >= expectedCount {
-            Sleep chatImageAttachmentSettleMs
-            confirmedCount := GetChatGptDraftAttachmentCount()
-            if confirmedCount >= expectedCount {
-                TestingLog(
-                    "chatgpt-attachment-ready",
-                    "Expected=" expectedCount "; detected=" confirmedCount "; elapsed_ms=" (A_TickCount - startedAt) "."
-                )
-                return true
-            }
-        }
-        if A_TickCount >= deadline {
-            TestingLog(
-                "chatgpt-attachment-timeout",
-                "Expected=" expectedCount "; last_detected=" lastCount "; timeout_ms=" chatImageAttachmentTimeoutMs "."
-            )
-            return false
-        }
-        Sleep chatImageAttachmentPollIntervalMs
-    }
-}
-
-PasteLargeTextToFocusedInput(text) {
-    savedClip := ClipboardAll()
-
-    A_Clipboard := ""
-    Sleep 150
-    A_Clipboard := text
-
-    if !ClipWait(2) {
-        A_Clipboard := savedClip
-        throw Error("Clipboard did not receive prompt text.")
-    }
-
-    ; ChatGPT's input is contenteditable, so the older verify routine could steal focus.
-    ; This simpler flow focuses, clears any draft text, pastes, and does not inspect the input afterwards.
-    Send "^a"
-    Sleep 180
-    Send "{Backspace}"
-    Sleep 250
-    Send "^v"
-    Sleep 1400
-
-    A_Clipboard := savedClip
-}
-
 ; Old verification functions have intentionally been left unused.
 ; They can be useful for debugging, but the main paste flow no longer calls them
 ; because selecting/copying from ChatGPT's input was causing focus problems.
-
-VerifyChatGptPromptPasted(prompt) {
-    savedClip := ClipboardAll()
-    A_Clipboard := ""
-    Sleep 150
-
-    Send "^a"
-    Sleep 180
-    Send "^c"
-
-    if !ClipWait(1.5) {
-        A_Clipboard := savedClip
-        return false
-    }
-
-    copied := A_Clipboard
-
-    Send "{Right}"
-    Sleep 100
-    Send "^{End}"
-    Sleep 100
-
-    A_Clipboard := savedClip
-
-    return PromptPasteLooksValid(copied, prompt)
-}
-
-PromptPasteLooksValid(copied, prompt) {
-    copied := CleanText(copied)
-    prompt := CleanText(prompt)
-
-    if copied = ""
-        return false
-
-    if InStr(copied, "Current page/product name:") && InStr(copied, "===AUTOMATION_OUTPUT_START===")
-        return true
-
-    firstChunk := SubStr(prompt, 1, 60)
-    minLength := Floor(StrLen(prompt) * 0.75)
-
-    if StrLen(copied) >= minLength && InStr(copied, firstChunk)
-        return true
-
-    return false
-}
-
-SetClipboardText(text) {
-    A_Clipboard := ""
-    Sleep 100
-    A_Clipboard := text
-
-    if !ClipWait(2) {
-        throw Error("Clipboard did not receive prompt text.")
-    }
-}
 
 
 ; ==========================================================
@@ -1354,14 +1171,6 @@ WaitForImageGalleryPageChange(previousSnapshot, timeoutMs := 0) {
             return false
         Sleep 200
     }
-}
-
-ClickCoordinates(point, delayMs := 250) {
-    if point[1] = 0 || point[2] = 0
-        throw Error("Coordinate not set.")
-
-    Click point[1], point[2]
-    Sleep delayMs
 }
 
 ValidateImageTargetConfig() {
@@ -2590,137 +2399,6 @@ OpenAndVerifyNextDepartmentProduct(product, productNumber) {
 ; COPY LATEST COMPLETED CHATGPT RESPONSE
 ; ==========================================================
 
-CopyLatestChatGptResponseToClipboard() {
-    savedClip := ClipboardAll()
-    uiaProblem := ""
-    fallbackProblem := ""
-
-    try {
-        ToolTip "Finding the latest ChatGPT response Copy button..."
-        if TryCopyLatestChatGptResponseWithUia(&uiaProblem) {
-            ToolTip()
-            return A_Clipboard
-        }
-
-        ToolTip "ChatGPT Copy button was not available through UIA.`nScrolling to the bottom for the coordinate fallback..."
-        if TryCopyLatestChatGptResponseByCoordinates(&fallbackProblem) {
-            ToolTip()
-            return A_Clipboard
-        }
-    } catch as err {
-        fallbackProblem := err.Message
-    }
-
-    ToolTip()
-    A_Clipboard := savedClip
-    throw Error(
-        "Could not copy the latest completed ChatGPT response. No CMS fields were changed."
-        . "`n`nUI Automation: " (uiaProblem != "" ? uiaProblem : "No valid response was copied.")
-        . "`n`nBottom-scroll fallback: " (fallbackProblem != "" ? fallbackProblem : "No valid response was copied.")
-    )
-}
-
-TryCopyLatestChatGptResponseWithUia(&problem) {
-    global chatgptWinTitle, chatResponseCopyTimeoutMs
-    problem := ""
-
-    try {
-        ActivateWindow(GetChatGptWinTitle(), 400)
-        document := UIA_Browser().GetCurrentDocumentElement()
-        copyButton := FindLatestChatGptResponseCopyButton(document)
-        if !copyButton {
-            problem := "No exact-name Copy button was exposed in the ChatGPT accessibility tree."
-            return false
-        }
-
-        A_Clipboard := ""
-        copyButton.Invoke()
-        if !ClipWait(chatResponseCopyTimeoutMs / 1000) {
-            problem := "The latest UIA Copy button did not place text on the clipboard."
-            return false
-        }
-        if !ClipboardHasCompleteAutomationOutput() {
-            problem := "The latest UIA Copy button did not copy one complete automation-output block."
-            return false
-        }
-        return true
-    } catch as err {
-        problem := err.Message
-        return false
-    }
-}
-
-FindLatestChatGptResponseCopyButton(document) {
-    try buttons := document.FindElements({ Name: "Copy", Type: "Button", mm: 2, cs: 0 })
-    catch
-        return 0
-
-    ; ChatGPT exposes code-block actions as "Copy code". Requiring the exact
-    ; accessible name "Copy" leaves only response action buttons. UIA traversal
-    ; order follows the conversation, so the final match belongs to the latest
-    ; completed assistant response even when it is below the visible viewport.
-    Loop buttons.Length {
-        button := buttons[buttons.Length - A_Index + 1]
-        try {
-            if StrLower(Trim(button.Name)) = "copy" && button.IsEnabled
-                return button
-        }
-    }
-    return 0
-}
-
-TryCopyLatestChatGptResponseByCoordinates(&problem) {
-    global chatgptWinTitle, chatResponseCopyTimeoutMs
-    global chatResponseScrollNotches
-    global chatResponseRecoveryPageUpCount, chatResponseRecoveryPageDownCount
-    global chatResponseCopyButtonPoint
-    problem := ""
-
-    try {
-        ActivateWindow(GetChatGptWinTitle(), 400)
-        MouseMove chatResponseCopyButtonPoint[1], chatResponseCopyButtonPoint[2], 0
-
-        ; Moving up first repairs the occasional ChatGPT conversation viewport
-        ; state where a direct bottom scroll stops exposing response actions.
-        Send "{PgUp " chatResponseRecoveryPageUpCount "}"
-        Sleep 500
-
-        ; Keep the original large wheel-down pass, then travel much farther down
-        ; than the short recovery move so long responses expose their Copy action.
-        SendNativeMouseWheel(-1, chatResponseScrollNotches)
-        Send "{PgDn " chatResponseRecoveryPageDownCount "}"
-        Sleep 900
-
-        A_Clipboard := ""
-        Click chatResponseCopyButtonPoint[1], chatResponseCopyButtonPoint[2]
-        if !ClipWait(chatResponseCopyTimeoutMs / 1000) {
-            problem := "Clicking " chatResponseCopyButtonPoint[1] "," chatResponseCopyButtonPoint[2] " did not place text on the clipboard."
-            return false
-        }
-        if !ClipboardHasCompleteAutomationOutput() {
-            problem := "The coordinate fallback did not copy one complete automation-output block."
-            return false
-        }
-        return true
-    } catch as err {
-        problem := err.Message
-        return false
-    }
-}
-
-ClipboardHasCompleteAutomationOutput() {
-    response := A_Clipboard
-    startMarker := "===AUTOMATION_OUTPUT_START==="
-    endMarker := "===AUTOMATION_OUTPUT_END==="
-    startPos := InStr(response, startMarker)
-    endPos := InStr(response, endMarker)
-    return response != ""
-        && CountTextOccurrences(response, startMarker) = 1
-        && CountTextOccurrences(response, endMarker) = 1
-        && startPos < endPos
-        && Trim(ExtractBetween(response, startMarker, endMarker), " `t`r`n") != ""
-}
-
 ; ==========================================================
 ; AUTOMATION OUTPUT PARSING
 ; ==========================================================
@@ -3404,60 +3082,6 @@ Flash(message, durationMs := 1500) {
 ; CORE HELPERS
 ; ==========================================================
 
-ActivateWindow(title, wakeDelayMs := 300) {
-    TestingLog("window-activate-request", "Requested window: " title "; wake_delay_ms=" wakeDelayMs ".")
-    if !WinExist(title) {
-        throw Error("Window not found: " title)
-    }
-
-    ; Do NOT call WinRestore on every activation.
-    ; WinRestore turns a maximised Chrome window into a restored/down-sized window,
-    ; which was causing the browser tab/window to "restore down" when Ctrl+Alt+P/B ran.
-    ; Only restore if the window is actually minimised.
-    try {
-        minMaxState := WinGetMinMax(title)
-        if minMaxState = -1 {
-            WinRestore(title)
-            Sleep 250
-        }
-    }
-
-    Loop 3 {
-        WinActivate(title)
-
-        if WinWaitActive(title, , 2) {
-            Sleep wakeDelayMs
-            TestingLog("window-activated", GetTestingActiveWindowSummary())
-            return true
-        }
-
-        Sleep 300
-    }
-
-    throw Error("Window did not become active: " title)
-}
-
-ClickPoint(name, delayMs := 250) {
-    global coords
-
-    if !coords.Has(name) {
-        throw Error("Missing coordinate: " name)
-    }
-
-    point := coords[name]
-
-    if point[1] = 0 || point[2] = 0 {
-        throw Error("Coordinate not set for: " name)
-    }
-
-    TestingLog(
-        "coordinate-click",
-        "Name=" name "; x=" point[1] "; y=" point[2] "; delay_ms=" delayMs "; " GetTestingActiveWindowSummary()
-    )
-    Click point[1], point[2]
-    Sleep delayMs
-}
-
 CopyFromPoint(name) {
     ClickPoint(name, 200)
     Sleep 150
@@ -3475,31 +3099,6 @@ CopyOptionalFromPoint(name) {
     Sleep 150
     text := CopySelectedText(2, true)
     TestingLog("field-copy-optional", "Field=" name "; chars=" StrLen(text) ".")
-    return text
-}
-
-CopySelectedText(timeout := 2, allowBlank := false) {
-    savedClip := ClipboardAll()
-    A_Clipboard := ""
-    Sleep 100
-
-    Send "^c"
-
-    if !ClipWait(timeout) {
-        ; Empty CMS fields are valid for optional fields such as meta title,
-        ; meta description and HTML snippet. Because the clipboard was cleared
-        ; before copying, a timeout here usually just means the selected field was blank.
-        if allowBlank {
-            A_Clipboard := savedClip
-            return ""
-        }
-
-        A_Clipboard := savedClip
-        throw Error("Clipboard did not receive copied text.")
-    }
-
-    text := A_Clipboard
-    A_Clipboard := savedClip
     return text
 }
 
@@ -3564,38 +3163,6 @@ NormalisePastedFieldValue(value) {
     ; or LF line endings. No other characters or whitespace are ignored.
     value := StrReplace(value, "`r`n", "`n")
     return StrReplace(value, "`r", "`n")
-}
-
-PasteText(text) {
-    savedClip := ClipboardAll()
-
-    ; An intentionally blank value clears the selected CMS field.
-    if text = "" {
-        Send "{Backspace}"
-        Sleep 250
-        A_Clipboard := savedClip
-        return
-    }
-
-    A_Clipboard := ""
-    Sleep 100
-
-    A_Clipboard := text
-
-    if !ClipWait(2) {
-        A_Clipboard := savedClip
-        throw Error("Clipboard did not receive paste text.")
-    }
-
-    Send "^v"
-    Sleep 350
-    A_Clipboard := savedClip
-}
-
-CopyBrowserUrl() {
-    Send "^l"
-    Sleep 150
-    return CopySelectedText(2, false)
 }
 
 SetActiveMatrixParentName(expectedName := "") {
@@ -3742,14 +3309,6 @@ FindUniqueBotzProductFolder(matchCode) {
     return matches[1]
 }
 
-LogSupplierChatGptImagePlan(supplierName, logPrefix, attachmentCount, cmsImageCount) {
-    message := "Attaching all " attachmentCount " supplier image(s) to ChatGPT using Ctrl+A."
-    message .= " The automation output, parser and GO b2b image work use only the first " cmsImageCount " image(s)."
-    if attachmentCount > cmsImageCount
-        message .= " The remaining " (attachmentCount - cmsImageCount) " attachment(s) are reference context only."
-    LogText(logPrefix "-image-plan", message)
-}
-
 BuildBotzSourceLog(state) {
     text := "Product name: " state["productName"]
     text .= "`nGO b2b stock code: " state["stockCode"]
@@ -3760,159 +3319,6 @@ BuildBotzSourceLog(state) {
     for index, imagePath in state["images"]
         text .= "`nImage " index ": " imagePath
     return text
-}
-
-AttachBotzImagesToChatGpt(imageFiles, supplierName := "BOTZ", logPrefix := "botz") {
-    if imageFiles.Length = 0
-        throw Error("No " supplierName " images were supplied for ChatGPT attachment.")
-
-    SplitPath imageFiles[1], , &imagesDir
-    ValidateBotzCtrlAImageFolder(imagesDir, imageFiles, supplierName)
-
-    selectionAttempted := false
-    try {
-        ToolTip "Opening ChatGPT attachments for " imageFiles.Length " " supplierName " images..."
-        OpenChatGptFilePicker()
-        selectionAttempted := true
-        ChooseAllBotzImagesInPicker(imagesDir, supplierName)
-        WaitForBotzChatAttachmentBatch(imageFiles, supplierName)
-        for index, imagePath in imageFiles
-            LogText(logPrefix "-chatgpt-attachment", "Batch submitted image " index " of " imageFiles.Length ": " imagePath)
-        LogText(logPrefix "-chatgpt-attachment", "Attachment settle timer completed for " imageFiles.Length " requested image(s).")
-        SubmitBotzChatGptDraft(supplierName, logPrefix)
-        ToolTip()
-        return true
-    } catch as err {
-        ToolTip()
-        Send "{Esc}"
-        LogText(logPrefix "-chatgpt-attachment-error", "Attachment batch failed: " err.Message)
-        if selectionAttempted
-            throw Error("The ChatGPT attachment selection started but did not complete safely. It was not retried, to avoid duplicates: " err.Message)
-        throw
-    }
-}
-
-OpenChatGptFilePicker() {
-    global chatgptWinTitle, botzFilePickerTimeoutMs
-    ActivateWindow(GetChatGptWinTitle(), 500)
-    ClickPoint("chat_add_button", 900)
-    ClickPoint("chat_add_attachments_button", 700)
-    picker := WinWaitActive("ahk_class #32770", , botzFilePickerTimeoutMs / 1000)
-    if !picker
-        throw Error("The Windows file picker did not open after clicking ChatGPT + at 2246,1026 and Add attachments at 2317,395.")
-    return picker
-}
-
-ChooseSingleFileInPicker(filePath) {
-    if !FileExist(filePath)
-        throw Error("File picker source no longer exists: " filePath)
-    ChooseFileSelectionInPicker(filePath)
-}
-
-ChooseAllBotzImagesInPicker(imagesDir, supplierName := "BOTZ") {
-    global botzFilePickerTimeoutMs, botzChatPickerSelectAllMs
-    picker := NavigateSupplierImagePickerToFolder(imagesDir, supplierName)
-    FocusWindowsFilePickerList(picker)
-    Sleep 700
-    Send "^a"
-    ToolTip "All " supplierName " images selected.`nWaiting before confirming..."
-    Sleep botzChatPickerSelectAllMs
-    Send "{Enter}"
-
-    if !WinWaitClose("ahk_id " picker, , botzFilePickerTimeoutMs / 1000)
-        throw Error("The Windows file picker did not close after Ctrl+A and confirmation.")
-}
-
-NavigateSupplierImagePickerToFolder(imagesDir, supplierName) {
-    global botzChatPickerFolderLoadMs
-    if !DirExist(imagesDir)
-        throw Error(supplierName " images folder no longer exists: " imagesDir)
-
-    picker := WinExist("A")
-    if !picker || !WinActive("ahk_class #32770")
-        throw Error("The Windows file picker is not active.")
-
-    savedClip := ClipboardAll()
-    try {
-        A_Clipboard := ""
-        A_Clipboard := imagesDir
-        if !ClipWait(2)
-            throw Error("The " supplierName " images-folder path could not be placed on the clipboard.")
-        Send "^l"
-        Sleep 600
-        Send "^a"
-        Send "^v"
-        Sleep 600
-        Send "{Enter}"
-        ToolTip "Waiting for the " supplierName " images folder to open..."
-        Sleep botzChatPickerFolderLoadMs
-    } finally {
-        A_Clipboard := savedClip
-    }
-    return picker
-}
-
-FocusWindowsFilePickerList(picker) {
-    candidates := ["DirectUIHWND2", "DirectUIHWND1", "SysListView321", "SHELLDLL_DefView1"]
-    for _, controlName in candidates {
-        try {
-            if !ControlGetHwnd(controlName, "ahk_id " picker)
-                continue
-            ControlFocus controlName, "ahk_id " picker
-            return controlName
-        }
-    }
-    throw Error("The Windows file list could not be focused, so Ctrl+A was not sent.")
-}
-
-ChooseFileSelectionInPicker(selectionText) {
-    global botzFilePickerTimeoutMs
-    picker := WinExist("A")
-    if !picker || !WinActive("ahk_class #32770")
-        throw Error("The Windows file picker is not active.")
-
-    savedClip := ClipboardAll()
-    try {
-        A_Clipboard := ""
-        A_Clipboard := selectionText
-        if !ClipWait(2)
-            throw Error("The file selection could not be placed on the clipboard.")
-        Send "!n"
-        Sleep 250
-        Send "^a"
-        Send "^v"
-        Sleep 250
-        Send "{Enter}"
-        if !WinWaitClose("ahk_id " picker, , botzFilePickerTimeoutMs / 1000)
-            throw Error("The Windows file picker did not close after submitting the file selection.")
-    } finally {
-        A_Clipboard := savedClip
-    }
-}
-
-WaitForBotzChatAttachmentBatch(imageFiles, supplierName := "BOTZ") {
-    global botzChatAttachmentSettleMs
-    startedAt := A_TickCount
-    Loop {
-        elapsed := A_TickCount - startedAt
-        ToolTip "Waiting for ChatGPT to process " imageFiles.Length " " supplierName " attachments...`n" Round(elapsed / 1000, 1) " seconds"
-        if elapsed >= botzChatAttachmentSettleMs
-            break
-        Sleep 500
-    }
-    return true
-}
-
-SubmitBotzChatGptDraft(supplierName := "BOTZ", logPrefix := "botz") {
-    global chatgptWinTitle, botzChatAttachmentSettleMs
-    ; WaitForBotzChatAttachmentBatch supplies the full ten-second period for
-    ; the draft to finish loading its images.
-    ToolTip supplierName " attachments settled. Sending the prepared request..."
-    ActivateWindow(GetChatGptWinTitle(), 300)
-    FocusChatGptInputForPaste()
-    TestingLog("chatgpt-pre-submit-wait", "Delay_ms=0; attachment_settle_ms=" botzChatAttachmentSettleMs "; workflow=" logPrefix "; supplier=" supplierName ".")
-    LogText(logPrefix "-chatgpt-submit", "Pressing Enter after the " Round(botzChatAttachmentSettleMs / 1000, 1) "-second " supplierName " attachment timer.")
-    Send "{Enter}"
 }
 
 PasteBotzOutputToCms() {
@@ -4776,16 +4182,6 @@ ScrollMatrixSkuListDownOneStep(anchorX, anchorY) {
     MouseMove anchorX, anchorY, 0
     SendNativeMouseWheel(-1, matrixScrollWheelNotchesPerStep)
     Sleep 650
-}
-
-SendNativeMouseWheel(direction, notchCount) {
-    ; mouse_event produces actual wheel input instead of a keyboard-style Send.
-    ; This avoids the Windows alert sound seen with large {WheelUp/Down} sends.
-    wheelDelta := direction > 0 ? 120 : -120
-    Loop notchCount {
-        DllCall("user32\mouse_event", "UInt", 0x0800, "UInt", 0, "UInt", 0, "Int", wheelDelta, "UPtr", 0)
-        Sleep 12
-    }
 }
 
 FindCurrentMatrixSkuButton(item) {
