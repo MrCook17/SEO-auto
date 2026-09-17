@@ -4,6 +4,8 @@
 #Include "UIA-v2\Lib\UIA.ahk"
 #Include "UIA-v2\Lib\UIA_Browser.ahk"
 #Include "lib\figuredart-product-creation.ahk"
+#Include "Helpers\Text.ahk"
+#Include "CMS\MatrixRows.ahk"
 
 SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
@@ -4011,29 +4013,6 @@ ExtractLabel(block, startLabel, endLabel := "") {
     return Trim(SubStr(block, startPos), " `t`r`n")
 }
 
-StripCodeFence(text) {
-    text := Trim(text, " `t`r`n")
-    bt := Chr(96)
-
-    ; Removes opening code fences copied from ChatGPT, including:
-    ; ```html
-    ; ``html
-    ; ```
-    ; ``
-    ; and longer markdown fences.
-    text := RegExReplace(text, "i)^\s*" bt "+\s*html\s*[\r\n]*", "")
-    text := RegExReplace(text, "i)^\s*" bt "+\s*[\r\n]*", "")
-
-    ; Removes trailing code fences, including malformed two-backtick endings.
-    text := RegExReplace(text, "[\r\n\s]*" bt "+\s*$", "")
-
-    return Trim(text, " `t`r`n")
-}
-
-CleanText(text) {
-    return Trim(text, " `t`r`n")
-}
-
 ClearActiveCmsProductCode() {
     global activeCmsProductCode
     activeCmsProductCode := ""
@@ -4082,11 +4061,6 @@ GetActiveCmsProductCodeFilePart() {
 
 BuildRunArtifactFileName(prefix, timestamp) {
     return GetSeoAutomationMode() "-" GetActiveCmsProductCodeFilePart() "-" prefix "-" timestamp ".txt"
-}
-
-EmptyToNA(text) {
-    text := CleanText(text)
-    return text = "" ? "N/A" : text
 }
 
 EnsureFolders() {
@@ -4594,10 +4568,6 @@ ValidateBotzPromptSettings(settings) {
         if url != "" && !IsBotzHttpUrl(url)
             throw Error("Inlink row " index " must use a complete http:// or https:// URL without spaces.")
     }
-}
-
-IsBotzHttpUrl(value) {
-    return RegExMatch(value, "i)^https?://[^\s]+$")
 }
 
 SaveBotzPromptSettings(settings) {
@@ -5670,10 +5640,6 @@ ParseMatrixImageOutput(block, state) {
     return Map("mode", "MATRIX_IMAGE", "productCount", productCount, "parentImageTitles", parentTitles, "parentImageAlts", parentAlts, "products", products)
 }
 
-NormaliseHarmlessWhitespace(value) {
-    return StrLower(RegExReplace(Trim(value), "\s+", " "))
-}
-
 ParseMatrixFullOutput(block, state) {
     productCount := state["productCount"], parentImageCount := state["parentImageCount"]
     expected := ["MODE", "PRODUCT_COUNT", "PARENT_IMAGE_COUNT", "TOTAL_IMAGE_COUNT", "PARENT_PRODUCT_NAME_RECOMMENDATION", "PARENT_META_TITLE", "PARENT_META_DESCRIPTION"]
@@ -6041,11 +6007,6 @@ ReacquireAndValidateMatrixOrder(products) {
             throw Error("Matrix SKU order changed at product " A_Index ". Expected '" products[A_Index]["productName"] "', detected '" currentName "'.")
     }
     return controls
-}
-
-DeriveVariantContext(productName, rowText) {
-    rowText := Trim(RegExReplace(rowText, "i)Editing Matrix Product:|\bEdit\b", ""))
-    return rowText = "" ? "Not separately available; see product name" : rowText
 }
 
 PasteMatrixFullOutputToCms() {
@@ -6537,16 +6498,6 @@ FindConnectedMatrixSkuSizeByGeometry(scope, editElement) {
     return best.Name
 }
 
-IsPlausibleConnectedSkuSize(value) {
-    value := Trim(value)
-    if value = "" || RegExMatch(value, "i)^(Size|Name|Edit|Remove|Skus?)\s*:?\s*$")
-        return false
-    ; Connected values are commonly capacities/dimensions, but retain other
-    ; concise matrix variants (such as named sizes) when they occupy the
-    ; verified left-hand cell.
-    return StrLen(value) <= 80 && !RegExMatch(value, "i)\bStock\s*Code\b|\bStockCode\b")
-}
-
 GetEditRowContext(element) {
     node := element, best := ""
     Loop 8 {
@@ -6607,15 +6558,6 @@ ExpandMatrixSkuRowContext(skuNode, baseText) {
         }
     }
     return best
-}
-
-CountMatrixSkuIdentities(text) {
-    count := 0, pos := 1
-    while RegExMatch(text, "i)\b(?:Stock\s*Code|StockCode)\s*:", &match, pos) {
-        count += 1
-        pos := match.Pos(0) + match.Len(0)
-    }
-    return count
 }
 
 CollectAllMatrixSkuButtons(scope) {
@@ -6697,15 +6639,6 @@ MatrixScopeHasOffscreenSkuEdits(scope) {
         }
     }
     return false
-}
-
-GetMatrixSkuRowKey(rowText) {
-    text := NormaliseMatrixRowText(rowText)
-    if RegExMatch(text, "i)\bStock\s*Code\s*:\s*([^ ]+)", &match)
-        return "stock:" StrLower(match[1])
-    if RegExMatch(text, "i)\bName\s*:?\s*(.+?)(?=\s+Stock\s*Code|\s+StockCode|$)", &match)
-        return "name:" NormaliseHarmlessWhitespace(match[1])
-    return ""
 }
 
 ScrollMatrixSkuListToTop(anchorX, anchorY) {
@@ -6879,56 +6812,6 @@ ClickMatrixEditButton(item) {
     Sleep 150
     Click currentItem.CentreX, currentItem.CentreY
     Sleep 750
-}
-
-ExtractMatrixProductNameFromRow(rowText, productIndex) {
-    text := NormaliseMatrixRowText(rowText)
-    if RegExMatch(text, "i)\bName\s*:?\s*(.+?)(?=\s+Stock\s*Code\s*:|\s+StockCode\s*:|\s+Edit\b|\s+Remove\b|$)", &match) {
-        name := Trim(match[1])
-        if name != ""
-            return name
-    }
-    throw Error("Could not extract the exact product name from accessibility row " productIndex ".`n`nRow text: " rowText "`n`nPress F8 to inspect the detected rows.")
-}
-
-ExtractConnectedMatrixSkuSize(rowText) {
-    text := NormaliseMatrixRowText(rowText)
-    ; A connected value is exposed before the row's Name field, for example:
-    ; "236ml (8oz) Name Electric Celadon Green ... StockCode: C626SM".
-    if RegExMatch(text, "i)^(.+?)(?=\s+Name\s*:?)", &match) {
-        size := Trim(match[1])
-        size := Trim(RegExReplace(size, "i)^(Size)\s*:?\s*", ""))
-        if size != ""
-            return size
-    }
-    return "Not separately exposed in the SKU accessibility row"
-}
-
-ExtractMatrixVariantFromRow(rowText, productName) {
-    text := NormaliseMatrixRowText(rowText)
-    if RegExMatch(text, "i)^(.+?)(?=\s+Name\s*:)", &match) {
-        variant := Trim(RegExReplace(match[1], "i)^(Size|Colour|Color|Variant)\s*:?\s*", ""))
-        if variant != ""
-            return variant
-    }
-    ; Many GO b2b rows expose the size only inside the product name, for
-    ; example: OG Square - 11" (11x11x.75 inch).
-    if RegExMatch(productName, "-\s*(.+?)(?=\s*\()", &nameMatch) {
-        variant := Trim(nameMatch[1])
-        ; Ignore an occasional stray accessibility digit after a quoted size.
-        variant := RegExReplace(variant, "^(.+?[\x22'])\s+\d+$", "$1")
-        if variant != ""
-            return variant
-    }
-    return "Not separately available; see product name"
-}
-
-NormaliseMatrixRowText(rowText) {
-    ; Remove Chrome's private-use icon glyphs and trailing button labels while
-    ; preserving the product name, size and stock code text.
-    text := RegExReplace(rowText, "[\x{E000}-\x{F8FF}]", " ")
-    text := RegExReplace(text, "i)\s+Edit\s+Remove\s*$", "")
-    return RegExReplace(Trim(text), "[\r\n\t ]+", " ")
 }
 
 IsBetterEditLocation(candidate, saved) {
