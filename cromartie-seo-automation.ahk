@@ -6,6 +6,9 @@
 #Include "lib\figuredart-product-creation.ahk"
 #Include "Helpers\Text.ahk"
 #Include "CMS\MatrixRows.ahk"
+#Include "SEO\OutputParsing.ahk"
+#Include "SEO\Validation.ahk"
+#Include "prompts\Builders.ahk"
 
 SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
@@ -481,11 +484,6 @@ SetImageCountToProcess(imageCount) {
     return true
 }
 
-GetDefaultImageNotes() {
-    global imageCountToProcess
-    return "Attached images. Number of product images: " imageCountToProcess "."
-}
-
 CaptureMouseCoords() {
     MouseGetPos &x, &y
     A_Clipboard := "x: " x ", y: " y
@@ -879,87 +877,9 @@ GetPromptTemplatePath() {
     return option["path"]
 }
 
-ReadPromptTemplateFile(templatePath) {
-    return FileRead(templatePath, "UTF-8")
-}
-
-BuildPromptFromTemplate(template, pageUrl, productName, currentMetaTitle, currentMetaDescription, currentHtmlSnippet, requiredInternalLinks, imageNotes, additionalProductNotes) {
-    prompt := template
-    prompt := StrReplace(prompt, "{{PAGE_URL}}", CleanText(pageUrl))
-    prompt := StrReplace(prompt, "{{PRODUCT_NAME}}", CleanText(productName))
-    prompt := StrReplace(prompt, "{{CURRENT_META_TITLE}}", EmptyToNA(currentMetaTitle))
-    prompt := StrReplace(prompt, "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(currentMetaDescription))
-    prompt := StrReplace(prompt, "{{CURRENT_HTML_SNIPPET}}", CleanText(currentHtmlSnippet))
-    prompt := StrReplace(prompt, "{{REQUIRED_INTERNAL_LINKS}}", requiredInternalLinks)
-    prompt := StrReplace(prompt, "{{IMAGE_NOTES}}", imageNotes)
-    prompt := StrReplace(prompt, "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotes)
-
-    return prompt
-}
-
 ; ==========================================================
 ; DYNAMIC IMAGE OUTPUT PROMPT SUPPORT
 ; ==========================================================
-
-EnsurePromptSupportsImageCount(prompt, imageCount) {
-    if imageCount = 0 {
-        ; Remove the template's default IMAGE_1 fields when this run has no
-        ; configured images. The ordinary-output parser then ends the preceding
-        ; field at the end of the automation block.
-        return RegExReplace(
-            prompt,
-            "is)IMAGE_1_TITLE:\s*[\r\n]+.*?===AUTOMATION_OUTPUT_END===",
-            "===AUTOMATION_OUTPUT_END==="
-        )
-    }
-
-    if imageCount <= 1
-        return prompt
-
-    imageOutputBlock := BuildAutomationImageOutputBlock(imageCount)
-
-    ; Replace the image section inside the automation block so ChatGPT returns
-    ; IMAGE_1_TITLE/ALT, IMAGE_2_TITLE/ALT, etc.
-    prompt := RegExReplace(
-        prompt,
-        "is)IMAGE_1_TITLE:\s*[\r\n]+.*?===AUTOMATION_OUTPUT_END===",
-        imageOutputBlock "===AUTOMATION_OUTPUT_END==="
-    )
-
-    ; Add a plain instruction as a fallback in case the exact prompt template changes later.
-    if !InStr(prompt, "IMAGE_" imageCount "_ALT:") {
-        prompt .= "`n`nImportant automation note: this product has " imageCount " attached images. The final automation block must include IMAGE_1_TITLE and IMAGE_1_ALT through IMAGE_" imageCount "_TITLE and IMAGE_" imageCount "_ALT."
-    }
-
-    return prompt
-}
-
-BuildAutomationImageOutputBlock(imageCount, includeImageNames := false) {
-    global maximumImagesPerProduct
-    if imageCount < 0 || imageCount > maximumImagesPerProduct
-        throw Error("Automation image output count must be between 0 and " maximumImagesPerProduct ".")
-    block := ""
-
-    Loop imageCount {
-        i := A_Index
-
-        if includeImageNames {
-            block .= "IMAGE_" i "_NAME:`n"
-            block .= "[clean CMS image name, not a filename, title or alt text]`n`n"
-        }
-        block .= "IMAGE_" i "_TITLE:`n"
-        block .= "[exact image " i " title only]`n`n"
-        block .= "IMAGE_" i "_ALT:`n"
-        block .= "[exact image " i " alt text only]"
-
-        if i < imageCount
-            block .= "`n`n"
-        else
-            block .= "`n"
-    }
-
-    return block
-}
 
 ; ==========================================================
 ; RELIABLE CHATGPT PROMPT PASTE
@@ -2996,47 +2916,6 @@ ClipboardHasCompleteAutomationOutput() {
 ; AUTOMATION OUTPUT PARSING
 ; ==========================================================
 
-ParseAutomationOutput(block, imageCount, metadataOnly := false) {
-    hasImageNames := imageCount > 0 && InStr(block, "IMAGE_1_NAME:")
-    firstImageLabel := imageCount > 0 ? "IMAGE_1_" (hasImageNames ? "NAME:" : "TITLE:") : ""
-    productNameRecommendation := ExtractLabel(block, "PRODUCT_NAME_RECOMMENDATION:", "META_TITLE:")
-    metaTitle := ExtractLabel(block, "META_TITLE:", "META_DESCRIPTION:")
-
-    if metadataOnly {
-        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", firstImageLabel)
-        htmlSnippet := ""
-    } else {
-        metaDescription := ExtractLabel(block, "META_DESCRIPTION:", "HTML_SNIPPET:")
-        htmlSnippet := ExtractLabel(block, "HTML_SNIPPET:", firstImageLabel)
-        htmlSnippet := StripCodeFence(htmlSnippet)
-    }
-
-    imageNames := []
-    imageTitles := []
-    imageAlts := []
-
-    Loop imageCount {
-        i := A_Index
-        nextImageLabel := i < imageCount ? "IMAGE_" (i + 1) (hasImageNames ? "_NAME:" : "_TITLE:") : ""
-
-        if hasImageNames
-            imageNames.Push(ExtractLabel(block, "IMAGE_" i "_NAME:", "IMAGE_" i "_TITLE:"))
-
-        imageTitles.Push(ExtractLabel(block, "IMAGE_" i "_TITLE:", "IMAGE_" i "_ALT:"))
-        imageAlts.Push(ExtractLabel(block, "IMAGE_" i "_ALT:", nextImageLabel))
-    }
-
-    return Map(
-        "productNameRecommendation", productNameRecommendation,
-        "metaTitle", metaTitle,
-        "metaDescription", metaDescription,
-        "htmlSnippet", htmlSnippet,
-        "imageNames", imageNames,
-        "imageTitles", imageTitles,
-        "imageAlts", imageAlts
-    )
-}
-
 ; ==========================================================
 ; CMS INSERTION HELPERS
 ; ==========================================================
@@ -3707,73 +3586,6 @@ WaitForCmsImageGalleryAfterDetailsSave(imageIndex) {
 ; VALIDATION
 ; ==========================================================
 
-ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, requireHtmlSnippet := true) {
-    warnings := ""
-
-    if CleanText(metaTitle) = ""
-        warnings .= "Meta title is empty.`n"
-
-    if CleanText(metaDescription) = ""
-        warnings .= "Meta description is empty.`n"
-
-    if requireHtmlSnippet && CleanText(htmlSnippet) = ""
-        warnings .= "HTML snippet is empty.`n"
-
-    Loop imageTitles.Length {
-        if CleanText(imageTitles[A_Index]) = ""
-            warnings .= "Image " A_Index " title is empty.`n"
-
-        if CleanText(imageAlts[A_Index]) = ""
-            warnings .= "Image " A_Index " alt text is empty.`n"
-    }
-
-    if StrLen(metaTitle) > 65
-        warnings .= "Meta title is over 65 characters.`n"
-
-    if StrLen(metaDescription) > 170
-        warnings .= "Meta description is over 170 characters.`n"
-
-    if requireHtmlSnippet {
-        if !InStr(htmlSnippet, "<")
-            warnings .= "HTML snippet does not look like HTML.`n"
-
-        if InStr(htmlSnippet, ":contentReference[") || InStr(htmlSnippet, "oaicite")
-            warnings .= "HTML may contain citation/source-token text.`n"
-
-        if InStr(htmlSnippet, "{{") || InStr(htmlSnippet, "}}")
-            warnings .= "HTML may still contain placeholder text.`n"
-    }
-
-    return warnings
-}
-
-IsUsableProductNameRecommendation(productNameRecommendation) {
-    name := CleanText(productNameRecommendation)
-
-    if name = ""
-        return false
-
-    lowerName := StrLower(name)
-
-    ; Do not paste explanatory/non-name recommendations into the CMS product name field.
-    if lowerName = "n/a" || lowerName = "na"
-        return false
-
-    if InStr(lowerName, "keep current")
-        return false
-
-    if InStr(lowerName, "no change")
-        return false
-
-    if InStr(lowerName, "do not change")
-        return false
-
-    if InStr(lowerName, "current product name")
-        return false
-
-    return true
-}
-
 Flash(message, durationMs := 1500) {
     ToolTip message
     SetTimer () => ToolTip(), -durationMs
@@ -3975,42 +3787,6 @@ CopyBrowserUrl() {
     Send "^l"
     Sleep 150
     return CopySelectedText(2, false)
-}
-
-ExtractBetween(text, startMarker, endMarker) {
-    startPos := InStr(text, startMarker)
-
-    if !startPos
-        return ""
-
-    startPos += StrLen(startMarker)
-
-    endPos := InStr(text, endMarker, , startPos)
-
-    if !endPos
-        return ""
-
-    return Trim(SubStr(text, startPos, endPos - startPos), " `t`r`n")
-}
-
-ExtractLabel(block, startLabel, endLabel := "") {
-    startPos := InStr(block, startLabel)
-
-    if !startPos
-        return ""
-
-    startPos += StrLen(startLabel)
-
-    if endLabel != "" {
-        endPos := InStr(block, endLabel, , startPos)
-
-        if !endPos
-            return Trim(SubStr(block, startPos), " `t`r`n")
-
-        return Trim(SubStr(block, startPos, endPos - startPos), " `t`r`n")
-    }
-
-    return Trim(SubStr(block, startPos), " `t`r`n")
 }
 
 ClearActiveCmsProductCode() {
@@ -4655,26 +4431,6 @@ LoadBotzPromptSettings() {
     return settings
 }
 
-BuildBotzRecommendedInlinks(settings) {
-    sections := []
-    Loop 2 {
-        index := A_Index
-        name := settings["inlink" index "Name"]
-        url := settings["inlink" index "Url"]
-        if name != ""
-            sections.Push("Inlink " index ":`nName: " name "`nURL: " url)
-    }
-    if settings["inlinkExtra"] != ""
-        sections.Push("Extra inlink information:`n" settings["inlinkExtra"])
-    if sections.Length = 0
-        return "NONE"
-
-    text := ""
-    for _, section in sections
-        text .= (text = "" ? "" : "`n`n") section
-    return text
-}
-
 ; ==========================================================
 ; BOTZ PRODUCT CREATION
 ; ==========================================================
@@ -4862,55 +4618,6 @@ CompareBotzPathsNaturally(pathA, pathB) {
     SplitPath pathB, &nameB
     result := DllCall("Shlwapi.dll\StrCmpLogicalW", "Str", nameA, "Str", nameB, "Int")
     return result != 0 ? result : StrCompare(pathA, pathB, false)
-}
-
-BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0, attachmentImageFiles := 0) {
-    if !IsObject(promptSettings)
-        promptSettings := CreateDefaultBotzPromptSettings()
-    if !IsObject(attachmentImageFiles)
-        attachmentImageFiles := imageFiles
-
-    requiredMarkers := [
-        "{{PAGE_URL}}",
-        "{{PRODUCT_NAME}}",
-        "{{PRODUCT_MD_CONTENT}}",
-        "{{IMAGE_COUNT}}",
-        "{{ATTACHMENT_IMAGE_COUNT}}",
-        "{{IMAGE_ORDER}}",
-        "{{RECOMMENDED_INLINKS}}",
-        "{{ADDITIONAL_NOTES}}",
-        "{{IMAGE_AUTOMATION_OUTPUT_FIELDS}}"
-    ]
-    for _, marker in requiredMarkers {
-        if !InStr(template, marker)
-            throw Error("The BOTZ prompt template is missing the required marker " marker ".")
-    }
-
-    imageOrder := ""
-    Loop attachmentImageFiles.Length {
-        SplitPath attachmentImageFiles[A_Index], &fileName
-        imageRole := A_Index <= imageFiles.Length
-            ? "GO b2b image " A_Index
-            : "reference only - do not return CMS image fields"
-        imageOrder .= "Attachment " A_Index " of " attachmentImageFiles.Length ": " fileName " (" imageRole ")`n"
-    }
-
-    outputFields := BuildAutomationImageOutputBlock(imageFiles.Length, true)
-    replacements := Map(
-        "{{PAGE_URL}}", CleanText(pageUrl),
-        "{{PRODUCT_NAME}}", productName,
-        "{{PRODUCT_MD_CONTENT}}", productMd,
-        "{{IMAGE_COUNT}}", imageFiles.Length,
-        "{{ATTACHMENT_IMAGE_COUNT}}", attachmentImageFiles.Length,
-        "{{IMAGE_ORDER}}", Trim(imageOrder),
-        "{{RECOMMENDED_INLINKS}}", BuildBotzRecommendedInlinks(promptSettings),
-        "{{ADDITIONAL_NOTES}}", promptSettings["additionalNotes"] != "" ? promptSettings["additionalNotes"] : "NONE",
-        "{{IMAGE_AUTOMATION_OUTPUT_FIELDS}}", outputFields
-    )
-    prompt := template
-    for marker, value in replacements
-        prompt := StrReplace(prompt, marker, value)
-    return prompt
 }
 
 BuildBotzSourceLog(state) {
@@ -5276,155 +4983,6 @@ BotzPathArraysMatch(pathsA, pathsB) {
     return true
 }
 
-ExtractValidatedAutomationBlock(response) {
-    startMarker := "===AUTOMATION_OUTPUT_START==="
-    endMarker := "===AUTOMATION_OUTPUT_END==="
-    if CountTextOccurrences(response, startMarker) != 1 || CountTextOccurrences(response, endMarker) != 1
-        throw Error("The ChatGPT response must contain exactly one complete automation-output marker pair.")
-    if InStr(response, endMarker) <= InStr(response, startMarker)
-        throw Error("The automation-output markers are in the wrong order.")
-    block := ExtractBetween(response, startMarker, endMarker)
-    if block = ""
-        throw Error("The automation-output block is empty.")
-    return block
-}
-
-CountTextOccurrences(text, needle) {
-    count := 0, position := 1
-    while position := InStr(text, needle, , position) {
-        count += 1
-        position += StrLen(needle)
-    }
-    return count
-}
-
-ParseBotzAutomationOutput(block, state) {
-    expected := ["MODE", "PRODUCT_NAME", "IMAGE_COUNT", "PRODUCT_NAME_RECOMMENDATION", "META_TITLE", "META_DESCRIPTION", "HTML_SNIPPET"]
-    Loop state["imageCount"] {
-        expected.Push("IMAGE_" A_Index "_NAME")
-        expected.Push("IMAGE_" A_Index "_TITLE")
-        expected.Push("IMAGE_" A_Index "_ALT")
-    }
-    fields := ParseOrderedAutomationFields(block, expected)
-
-    mode := ValidateMatrixFullOneLine(fields["MODE"], "BOTZ mode")
-    if mode != "BOTZ_PRODUCT_CREATION"
-        throw Error("BOTZ output MODE must be BOTZ_PRODUCT_CREATION.")
-    echoedName := ValidateMatrixFullOneLine(fields["PRODUCT_NAME"], "BOTZ product name")
-    if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["productName"])
-        throw Error("The BOTZ output product name does not match the saved GO b2b product name.")
-    if !IsInteger(fields["IMAGE_COUNT"]) || Integer(fields["IMAGE_COUNT"]) != state["imageCount"]
-        throw Error("The BOTZ output image count does not match the current BOTZ image folder.")
-
-    recommendation := ValidateMatrixFullOneLine(fields["PRODUCT_NAME_RECOMMENDATION"], "Product name recommendation")
-    metaTitle := ValidateMatrixFullOneLine(fields["META_TITLE"], "Meta title")
-    metaDescription := ValidateMatrixFullOneLine(fields["META_DESCRIPTION"], "Meta description")
-    htmlSnippet := StripCodeFence(fields["HTML_SNIPPET"])
-    ValidateBotzHtml(htmlSnippet)
-
-    imageNames := [], imageTitles := [], imageAlts := []
-    Loop state["imageCount"] {
-        i := A_Index
-        imageName := ValidateCmsImageName(fields["IMAGE_" i "_NAME"], i)
-        imageTitle := ValidateImageOutputValue(fields["IMAGE_" i "_TITLE"], "Image " i " title")
-        imageAlt := ValidateImageOutputValue(fields["IMAGE_" i "_ALT"], "Image " i " alt text")
-        if NormaliseHarmlessWhitespace(imageName) = NormaliseHarmlessWhitespace(imageTitle) || NormaliseHarmlessWhitespace(imageName) = NormaliseHarmlessWhitespace(imageAlt)
-            throw Error("Image " i " Name must be distinct from its Title and Alt text.")
-        if NormaliseHarmlessWhitespace(imageTitle) = NormaliseHarmlessWhitespace(imageAlt)
-            throw Error("Image " i " Title and Alt text are identical.")
-        imageNames.Push(imageName), imageTitles.Push(imageTitle), imageAlts.Push(imageAlt)
-    }
-
-    warnings := ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, true)
-    if warnings != ""
-        throw Error("BOTZ generated-field validation failed:`n" warnings)
-
-    return Map(
-        "mode", mode,
-        "productName", echoedName,
-        "productNameRecommendation", recommendation,
-        "metaTitle", metaTitle,
-        "metaDescription", metaDescription,
-        "htmlSnippet", htmlSnippet,
-        "imageNames", imageNames,
-        "imageTitles", imageTitles,
-        "imageAlts", imageAlts
-    )
-}
-
-ParseOrderedAutomationFields(block, expectedLabels) {
-    text := StrReplace(block, "`r", "")
-    allowed := Map(), fields := Map(), locations := []
-    for _, label in expectedLabels
-        allowed[label] := true
-
-    position := 1
-    while found := RegExMatch(text, "m)^([A-Z][A-Z0-9_]*):[ `t]*$", &match, position) {
-        label := match[1]
-        if !allowed.Has(label)
-            throw Error("Unexpected automation label: " label ".")
-        position := found + StrLen(match[0])
-    }
-
-    searchFrom := 1
-    for _, label in expectedLabels {
-        pattern := "m)^" label ":[ `t]*$"
-        found := RegExMatch(text, pattern, &match, searchFrom)
-        if !found
-            throw Error("Missing or out-of-order automation field: " label ".")
-        duplicate := RegExMatch(text, pattern, , found + StrLen(match[0]))
-        if duplicate
-            throw Error("Duplicate automation label: " label ".")
-        locations.Push(Map("label", label, "labelStart", found, "valueStart", found + StrLen(match[0])))
-        searchFrom := found + StrLen(match[0])
-    }
-    if Trim(SubStr(text, 1, locations[1]["labelStart"] - 1), " `t`n") != ""
-        throw Error("Unexpected text appears before the first product-creation automation field.")
-
-    Loop locations.Length {
-        item := locations[A_Index]
-        valueEnd := A_Index < locations.Length ? locations[A_Index + 1]["labelStart"] : StrLen(text) + 1
-        fields[item["label"]] := Trim(SubStr(text, item["valueStart"], valueEnd - item["valueStart"]), " `t`n")
-    }
-    return fields
-}
-
-ValidateCmsImageName(value, imageIndex) {
-    value := ValidateImageOutputValue(value, "Image " imageIndex " name")
-    if InStr(value, "\") || InStr(value, "/") || RegExMatch(value, "i)\.(jpe?g|png|webp)$")
-        throw Error("Image " imageIndex " Name looks like a file path or filename. It must be a clean CMS image name.")
-    return value
-}
-
-ValidateBotzHtml(htmlSnippet) {
-    if CleanText(htmlSnippet) = ""
-        throw Error("BOTZ HTML snippet is empty.")
-    if !InStr(htmlSnippet, "<")
-        throw Error("BOTZ HTML snippet does not look like HTML.")
-    if InStr(htmlSnippet, "{{") || InStr(htmlSnippet, "}}")
-        throw Error("BOTZ HTML snippet contains placeholder text.")
-    if RegExMatch(htmlSnippet, "i)(oaicite|contentReference|:source\[|\[citation)")
-        throw Error("BOTZ HTML snippet contains citation/source-token text.")
-    if InStr(htmlSnippet, Chr(96) Chr(96) Chr(96))
-        throw Error("BOTZ HTML snippet still contains a code fence.")
-}
-
-BuildBotzParsedOutputLog(output) {
-    text := "Mode: " output["mode"]
-    text .= "`nProduct name: " output["productName"]
-    text .= "`nRecommendation: " output["productNameRecommendation"]
-    text .= "`nMeta title: " output["metaTitle"]
-    text .= "`nMeta description: " output["metaDescription"]
-    text .= "`nHTML snippet:`n" output["htmlSnippet"]
-    Loop output["imageNames"].Length {
-        i := A_Index
-        text .= "`nImage " i " Name: " output["imageNames"][i]
-        text .= "`nImage " i " Title: " output["imageTitles"][i]
-        text .= "`nImage " i " Alt: " output["imageAlts"][i]
-    }
-    return text
-}
-
 VerifyBotzCmsProduct(state, output) {
     ClickPoint("overview_tab", 500)
     currentProductName := CleanText(CopyFromPoint("product_name"))
@@ -5509,254 +5067,6 @@ UploadAndPopulateSingleBotzImage(state, imagePath, imageIndex, totalImages, outp
 ; STRICT IMAGE/MATRIX OUTPUT PARSING
 ; ==========================================================
 
-InjectImageOnlyOutputFields(prompt, imageCount) {
-    fields := BuildAutomationImageOutputBlock(imageCount, true)
-    return StrReplace(StrReplace(prompt, "{{IMAGE_COUNT}}", imageCount), "{{IMAGE_AUTOMATION_OUTPUT_FIELDS}}", fields)
-}
-
-ParseImageOnlyOutput(block, imageCount) {
-    expected := ["MODE", "IMAGE_COUNT"]
-    Loop imageCount {
-        expected.Push("IMAGE_" A_Index "_NAME")
-        expected.Push("IMAGE_" A_Index "_TITLE")
-        expected.Push("IMAGE_" A_Index "_ALT")
-    }
-    fields := ParseExactLineFields(block, expected)
-    if fields["MODE"] != "IMAGE_ONLY"
-        throw Error("Image output MODE must be IMAGE_ONLY.")
-    if !IsInteger(fields["IMAGE_COUNT"]) || Integer(fields["IMAGE_COUNT"]) != imageCount
-        throw Error("Image output count does not match imageCountToProcess (" imageCount ").")
-    names := [], titles := [], alts := []
-    Loop imageCount {
-        name := ValidateCmsImageName(fields["IMAGE_" A_Index "_NAME"], A_Index)
-        title := ValidateImageOutputValue(fields["IMAGE_" A_Index "_TITLE"], "Image " A_Index " title")
-        alt := ValidateImageOutputValue(fields["IMAGE_" A_Index "_ALT"], "Image " A_Index " alt")
-        if NormaliseHarmlessWhitespace(name) = NormaliseHarmlessWhitespace(title) || NormaliseHarmlessWhitespace(name) = NormaliseHarmlessWhitespace(alt)
-            throw Error("Image " A_Index " Name must be distinct from its Title and Alt text.")
-        if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
-            throw Error("Image " A_Index " title and alt text are identical.")
-        names.Push(name), titles.Push(title), alts.Push(alt)
-    }
-    return Map("productNameRecommendation", "", "metaTitle", "", "metaDescription", "", "htmlSnippet", "", "imageNames", names, "imageTitles", titles, "imageAlts", alts)
-}
-
-ParseExactLineFields(block, expectedLabels) {
-    allowed := Map()
-    for _, label in expectedLabels
-        allowed[label] := true
-    fields := Map(), pending := ""
-    for _, rawLine in StrSplit(StrReplace(block, "`r", ""), "`n") {
-        line := Trim(rawLine, " `t")
-        if line = ""
-            continue
-        if RegExMatch(line, "^([A-Z][A-Z0-9_]*):$", &match) {
-            label := match[1]
-            if !allowed.Has(label)
-                throw Error("Unexpected automation label: " label ".")
-            if fields.Has(label) || pending != ""
-                throw Error(pending != "" ? "Missing value for " pending "." : "Duplicate automation label: " label ".")
-            pending := label
-            continue
-        }
-        if pending = ""
-            throw Error("Unexpected text in automation block: " line)
-        fields[pending] := line
-        pending := ""
-    }
-    if pending != ""
-        throw Error("Missing value for " pending ".")
-    for _, label in expectedLabels {
-        if !fields.Has(label)
-            throw Error("Missing automation field: " label ".")
-    }
-    return fields
-}
-
-ValidateImageOutputValue(value, fieldName) {
-    value := Trim(value)
-    if value = "" || RegExMatch(value, "i)^\[.*\]$") || InStr(value, "{{")
-        throw Error(fieldName " is blank or contains a placeholder.")
-    if InStr(value, "`n") || InStr(value, "`r")
-        throw Error(fieldName " must be one line.")
-    if RegExMatch(value, "i)(oaicite|contentReference|:source\[|\[citation)")
-        throw Error(fieldName " contains citation/source-token text.")
-    return value
-}
-
-ParseMatrixImageOutput(block, state) {
-    productCount := state["productCount"], parentImageCount := state["parentImageCount"]
-    expected := ["MODE", "PRODUCT_COUNT", "PARENT_IMAGE_COUNT", "TOTAL_IMAGE_COUNT"]
-    Loop parentImageCount {
-        expected.Push("PARENT_IMAGE_" A_Index "_TITLE")
-        expected.Push("PARENT_IMAGE_" A_Index "_ALT")
-    }
-    Loop productCount {
-        p := A_Index
-        expected.Push("PRODUCT_" p "_NAME")
-        expected.Push("PRODUCT_" p "_IMAGE_COUNT")
-        Loop state["products"][p]["imageCount"] {
-            expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_TITLE")
-            expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_ALT")
-        }
-    }
-    fields := ParseExactLineFields(block, expected)
-    if fields["MODE"] != "MATRIX_IMAGE"
-        throw Error("Matrix output MODE must be MATRIX_IMAGE.")
-    if !IsInteger(fields["PRODUCT_COUNT"]) || Integer(fields["PRODUCT_COUNT"]) != productCount
-        throw Error("Matrix product count does not match the saved prompt state.")
-    if !IsInteger(fields["PARENT_IMAGE_COUNT"]) || Integer(fields["PARENT_IMAGE_COUNT"]) != parentImageCount
-        throw Error("Parent image count does not match the saved prompt state.")
-    if !IsInteger(fields["TOTAL_IMAGE_COUNT"]) || Integer(fields["TOTAL_IMAGE_COUNT"]) != GetMatrixTotalImageCount(state)
-        throw Error("Total image count does not match the saved prompt state.")
-    parentTitles := [], parentAlts := []
-    Loop parentImageCount {
-        i := A_Index
-        title := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_TITLE"], "Parent image " i " title")
-        alt := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_ALT"], "Parent image " i " alt")
-        if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
-            throw Error("Parent image " i " title and alt text are identical.")
-        parentTitles.Push(title), parentAlts.Push(alt)
-    }
-    products := []
-    Loop productCount {
-        p := A_Index
-        imageCount := state["products"][p]["imageCount"]
-        echoedName := fields["PRODUCT_" p "_NAME"]
-        if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
-            throw Error("Product " p " name does not match the saved matrix order.")
-        if !IsInteger(fields["PRODUCT_" p "_IMAGE_COUNT"]) || Integer(fields["PRODUCT_" p "_IMAGE_COUNT"]) != imageCount
-            throw Error("Product " p " image count does not match the saved prompt state.")
-        titles := [], alts := []
-        Loop imageCount {
-            i := A_Index
-            title := ValidateImageOutputValue(fields["PRODUCT_" p "_IMAGE_" i "_TITLE"], "Product " p ", image " i " title")
-            alt := ValidateImageOutputValue(fields["PRODUCT_" p "_IMAGE_" i "_ALT"], "Product " p ", image " i " alt")
-            if StrLower(title) = StrLower(alt)
-                throw Error("Product " p ", image " i " title and alt text are identical.")
-            titles.Push(title), alts.Push(alt)
-        }
-        products.Push(Map("productName", echoedName, "imageTitles", titles, "imageAlts", alts))
-    }
-    return Map("mode", "MATRIX_IMAGE", "productCount", productCount, "parentImageTitles", parentTitles, "parentImageAlts", parentAlts, "products", products)
-}
-
-ParseMatrixFullOutput(block, state) {
-    productCount := state["productCount"], parentImageCount := state["parentImageCount"]
-    expected := ["MODE", "PRODUCT_COUNT", "PARENT_IMAGE_COUNT", "TOTAL_IMAGE_COUNT", "PARENT_PRODUCT_NAME_RECOMMENDATION", "PARENT_META_TITLE", "PARENT_META_DESCRIPTION"]
-    Loop parentImageCount {
-        expected.Push("PARENT_IMAGE_" A_Index "_TITLE")
-        expected.Push("PARENT_IMAGE_" A_Index "_ALT")
-    }
-    Loop productCount {
-        p := A_Index
-        expected.Push("PRODUCT_" p "_NAME")
-        expected.Push("PRODUCT_" p "_IMAGE_COUNT")
-        expected.Push("PRODUCT_" p "_HTML_SNIPPET")
-        Loop state["products"][p]["imageCount"] {
-            expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_TITLE")
-            expected.Push("PRODUCT_" p "_IMAGE_" A_Index "_ALT")
-        }
-    }
-
-    ; Validate the complete label sequence first. This rejects duplicates,
-    ; missing fields, unexpected products and fields outside the saved matrix.
-    labels := []
-    pos := 1
-    while RegExMatch(block, "m)^\s*([A-Z][A-Z0-9_]*):\s*$", &match, pos) {
-        labels.Push(match[1])
-        pos := match.Pos(0) + match.Len(0)
-    }
-    if labels.Length != expected.Length
-        throw Error("Matrix-full output contains " labels.Length " fields; expected " expected.Length ".")
-    Loop expected.Length {
-        if labels[A_Index] != expected[A_Index]
-            throw Error("Matrix-full field " A_Index " must be " expected[A_Index] ", but found " labels[A_Index] ".")
-    }
-
-    fields := Map()
-    Loop expected.Length {
-        label := expected[A_Index]
-        startNeedle := label ":"
-        startPos := InStr(block, startNeedle)
-        startPos += StrLen(startNeedle)
-        if A_Index < expected.Length {
-            nextPos := InStr(block, expected[A_Index + 1] ":", , startPos)
-            value := SubStr(block, startPos, nextPos - startPos)
-        } else
-            value := SubStr(block, startPos)
-        fields[label] := Trim(value, " `t`r`n")
-    }
-
-    if fields["MODE"] != "MATRIX_FULL"
-        throw Error("Matrix-full output MODE must be MATRIX_FULL.")
-    if !IsInteger(fields["PRODUCT_COUNT"]) || Integer(fields["PRODUCT_COUNT"]) != productCount
-        throw Error("Matrix-full product count does not match the saved prompt state.")
-    if !IsInteger(fields["PARENT_IMAGE_COUNT"]) || Integer(fields["PARENT_IMAGE_COUNT"]) != parentImageCount
-        throw Error("Matrix-full parent image count does not match the saved prompt state.")
-    if !IsInteger(fields["TOTAL_IMAGE_COUNT"]) || Integer(fields["TOTAL_IMAGE_COUNT"]) != GetMatrixTotalImageCount(state)
-        throw Error("Matrix-full total image count does not match the saved prompt state.")
-
-    parentRecommendation := ValidateMatrixFullOneLine(fields["PARENT_PRODUCT_NAME_RECOMMENDATION"], "Parent product-name recommendation", false)
-    parentTitle := ValidateMatrixFullOneLine(fields["PARENT_META_TITLE"], "Parent meta title")
-    parentDescription := ValidateMatrixFullOneLine(fields["PARENT_META_DESCRIPTION"], "Parent meta description")
-    parentTitles := [], parentAlts := []
-    Loop parentImageCount {
-        i := A_Index
-        title := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_TITLE"], "Parent image " i " title")
-        alt := ValidateImageOutputValue(fields["PARENT_IMAGE_" i "_ALT"], "Parent image " i " alt")
-        if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
-            throw Error("Parent image " i " title and alt text are identical.")
-        parentTitles.Push(title), parentAlts.Push(alt)
-    }
-    products := []
-    Loop productCount {
-        p := A_Index
-        imageCount := state["products"][p]["imageCount"]
-        echoedName := ValidateMatrixFullOneLine(fields["PRODUCT_" p "_NAME"], "Product " p " name")
-        if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["products"][p]["productName"])
-            throw Error("Product " p " name does not match saved child '" state["products"][p]["productName"] "'.")
-        if !IsInteger(fields["PRODUCT_" p "_IMAGE_COUNT"]) || Integer(fields["PRODUCT_" p "_IMAGE_COUNT"]) != imageCount
-            throw Error("Product " p " image count does not match the saved prompt state.")
-        html := StripCodeFence(fields["PRODUCT_" p "_HTML_SNIPPET"])
-        ValidateMatrixFullHtml(html, p)
-        titles := [], alts := []
-        Loop imageCount {
-            i := A_Index
-            title := ValidateImageOutputValue(fields["PRODUCT_" p "_IMAGE_" i "_TITLE"], "Product " p ", image " i " title")
-            alt := ValidateImageOutputValue(fields["PRODUCT_" p "_IMAGE_" i "_ALT"], "Product " p ", image " i " alt")
-            if NormaliseHarmlessWhitespace(title) = NormaliseHarmlessWhitespace(alt)
-                throw Error("Product " p ", image " i " title and alt text are identical.")
-            titles.Push(title), alts.Push(alt)
-        }
-        products.Push(Map("productName", echoedName, "htmlSnippet", html, "imageTitles", titles, "imageAlts", alts))
-    }
-    return Map("mode", "MATRIX_FULL", "productCount", productCount, "parentProductNameRecommendation", parentRecommendation, "parentMetaTitle", parentTitle, "parentMetaDescription", parentDescription, "parentImageTitles", parentTitles, "parentImageAlts", parentAlts, "products", products)
-}
-
-ValidateMatrixFullOneLine(value, fieldName, requireValue := true) {
-    value := Trim(value)
-    if requireValue && value = ""
-        throw Error(fieldName " is empty.")
-    if InStr(value, "`n") || InStr(value, "`r")
-        throw Error(fieldName " must be one line.")
-    if RegExMatch(value, "i)^\s*\[.*\]\s*$") || InStr(value, "{{")
-        throw Error(fieldName " contains placeholder text.")
-    if RegExMatch(value, "i)(oaicite|contentReference|:source\[|\[citation)")
-        throw Error(fieldName " contains citation/source-token text.")
-    return value
-}
-
-ValidateMatrixFullHtml(html, productIndex) {
-    if Trim(html) = ""
-        throw Error("Product " productIndex " HTML snippet is empty.")
-    if InStr(html, "{{") || RegExMatch(html, "i)\[(exact|complete|insert|one-line|placeholder)[^]]*\]")
-        throw Error("Product " productIndex " HTML snippet contains placeholder text.")
-    if RegExMatch(html, "i)(oaicite|contentReference|:source\[|\[citation)")
-        throw Error("Product " productIndex " HTML snippet contains citation/source-token text.")
-    if InStr(html, Chr(96) Chr(96) Chr(96))
-        throw Error("Product " productIndex " HTML snippet still contains a code fence.")
-}
-
 ; ==========================================================
 ; MATRIX PROMPT, STATE AND INSERTION
 ; ==========================================================
@@ -5827,35 +5137,6 @@ BuildMatrixImagePrompt(pageUrl) {
     ActivateWindow(GetChatGptWinTitle())
     FocusChatGptInputForPaste()
     Flash("Matrix prompt and attachments are ready for manual review.", 3000)
-}
-
-BuildMatrixPromptFromState(template, pageUrl, metaTitle, metaDescription, firstHtml, state) {
-    global additionalProductNotesDefault
-    productsText := "", mapping := "", outputFields := "", attachment := 0
-    parentCount := state["parentImageCount"]
-    if parentCount {
-        Loop parentCount {
-            i := A_Index, attachment += 1
-            mapping .= "Attached image " attachment " = Parent matrix product, Image " i "`n"
-            outputFields .= "PARENT_IMAGE_" i "_TITLE:`n[one-line value]`n`nPARENT_IMAGE_" i "_ALT:`n[one-line value]`n`n"
-        }
-    }
-    for p, product in state["products"] {
-        imageCount := product["imageCount"]
-        imageSummary := imageCount = 0 ? "No images are configured for this product." : "Attached images: Product " p " Image 1 through Product " p " Image " imageCount
-        productsText .= "Product " p ":`nExact product name: " product["productName"] "`nVariant, size or colour difference: " product["variantContext"] "`nSKU row context: " EmptyToNA(product["skuRowText"]) "`n" imageSummary "`n`n"
-        outputFields .= "PRODUCT_" p "_NAME:`n[exact input product name unchanged]`n`nPRODUCT_" p "_IMAGE_COUNT:`n" imageCount "`n`n"
-        Loop imageCount {
-            i := A_Index, attachment += 1
-            mapping .= "Attached image " attachment " = Product " p ", Image " i "`n"
-            outputFields .= "PRODUCT_" p "_IMAGE_" i "_TITLE:`n[one-line value]`n`nPRODUCT_" p "_IMAGE_" i "_ALT:`n[one-line value]`n`n"
-        }
-    }
-    prompt := template
-    replacements := Map("{{PAGE_URL}}", pageUrl, "{{MATRIX_PRODUCT_NAME}}", state["parentProductName"], "{{CURRENT_META_TITLE}}", EmptyToNA(metaTitle), "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(metaDescription), "{{FIRST_CHILD_HTML_SNIPPET}}", EmptyToNA(firstHtml), "{{PRODUCT_COUNT}}", state["productCount"], "{{PARENT_IMAGE_COUNT}}", parentCount, "{{TOTAL_IMAGE_COUNT}}", GetMatrixTotalImageCount(state), "{{MATRIX_PRODUCTS}}", Trim(productsText), "{{ATTACHMENT_ORDER}}", EmptyToNA(Trim(mapping)), "{{IMAGE_NOTES}}", BuildMatrixImageCountSummary(state), "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotesDefault, "{{MATRIX_AUTOMATION_OUTPUT_FIELDS}}", outputFields)
-    for token, value in replacements
-        prompt := StrReplace(prompt, token, value)
-    return prompt
 }
 
 BuildMatrixFullPrompt(pageUrl) {
@@ -5929,60 +5210,11 @@ BuildMatrixFullPrompt(pageUrl) {
     Flash("Matrix-full prompt and attachments are ready for manual review.", 3000)
 }
 
-BuildMatrixFullPromptFromState(template, pageUrl, metaTitle, metaDescription, state) {
-    global requiredInternalLinksDefault, additionalProductNotesDefault
-    productsText := "", mapping := "", outputFields := "", attachment := 0, bt := Chr(96)
-    parentCount := state["parentImageCount"]
-    Loop parentCount {
-        i := A_Index, attachment += 1
-        mapping .= "Attached image " attachment " = Parent matrix product, Image " i "`n"
-        outputFields .= "PARENT_IMAGE_" i "_TITLE:`n[one-line image title]`n`nPARENT_IMAGE_" i "_ALT:`n[one-line image alt text]`n`n"
-    }
-    for p, product in state["products"] {
-        imageCount := product["imageCount"]
-        imageSummary := imageCount = 0 ? "No images are configured for this product." : "Attached images: Product " p " Image 1 through Product " p " Image " imageCount
-        productsText .= "Product " p ":`nExact child product name (audit identifier): " product["productName"] "`nConnected SKU size (from the same accessibility row): " EmptyToNA(product["connectedSize"]) "`nVariant context: " product["variantContext"] "`nFull SKU row context: " EmptyToNA(product["skuRowText"]) "`nCurrent child HTML/product description snippet:`n" bt bt bt "html`n" product["originalHtmlSnippet"] "`n" bt bt bt "`n" imageSummary "`n`n"
-        outputFields .= "PRODUCT_" p "_NAME:`n[exact original child name unchanged]`n`nPRODUCT_" p "_IMAGE_COUNT:`n" imageCount "`n`nPRODUCT_" p "_HTML_SNIPPET:`n" bt bt bt "html`n[complete multiline child HTML]`n" bt bt bt "`n`n"
-        Loop imageCount {
-            i := A_Index, attachment += 1
-            mapping .= "Attached image " attachment " = Product " p ", Image " i "`n"
-            outputFields .= "PRODUCT_" p "_IMAGE_" i "_TITLE:`n[one-line image title]`n`nPRODUCT_" p "_IMAGE_" i "_ALT:`n[one-line image alt text]`n`n"
-        }
-    }
-    replacements := Map(
-        "{{PAGE_URL}}", pageUrl,
-        "{{MATRIX_PRODUCT_NAME}}", state["parentProductName"],
-        "{{CURRENT_META_TITLE}}", EmptyToNA(metaTitle),
-        "{{CURRENT_META_DESCRIPTION}}", EmptyToNA(metaDescription),
-        "{{PRODUCT_COUNT}}", state["productCount"],
-        "{{PARENT_IMAGE_COUNT}}", parentCount,
-        "{{TOTAL_IMAGE_COUNT}}", GetMatrixTotalImageCount(state),
-        "{{MATRIX_PRODUCTS}}", Trim(productsText),
-        "{{ATTACHMENT_ORDER}}", Trim(mapping),
-        "{{IMAGE_NOTES}}", BuildMatrixImageCountSummary(state),
-        "{{REQUIRED_INTERNAL_LINKS}}", requiredInternalLinksDefault,
-        "{{ADDITIONAL_PRODUCT_NOTES}}", additionalProductNotesDefault,
-        "{{MATRIX_AUTOMATION_OUTPUT_FIELDS}}", outputFields
-    )
-    prompt := template
-    for token, value in replacements
-        prompt := StrReplace(prompt, token, value)
-    return prompt
-}
-
 GetMatrixTotalImageCount(state) {
     total := state["parentImageCount"]
     for _, product in state["products"]
         total += product["imageCount"]
     return total
-}
-
-BuildMatrixImageCountSummary(state) {
-    summary := "Parent matrix product: " state["parentImageCount"] " image(s)."
-    for p, product in state["products"]
-        summary .= "`nProduct " p ": " product["imageCount"] " image(s)."
-    summary .= "`nTotal attachments: " GetMatrixTotalImageCount(state) "."
-    return summary
 }
 
 ValidateMatrixStateImageTargets(state, availableTargets) {
