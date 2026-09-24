@@ -476,6 +476,8 @@ GetImageGalleryCardControlCounts(scope) {
 
 CountExactImageGalleryElements(scope, expectedName, typeName) {
     count := 0
+    ; UIA's Image control type is localised by Chrome as "graphic".
+    expectedLocalizedType := StrLower(typeName) = "image" ? "graphic" : StrLower(typeName)
     condition := expectedName = ""
         ? { Type: typeName }
         : { Name: expectedName, Type: typeName, mm: 2, cs: 0 }
@@ -486,6 +488,8 @@ CountExactImageGalleryElements(scope, expectedName, typeName) {
     for _, element in elements {
         try {
             if expectedName != "" && StrLower(Trim(element.Name)) != StrLower(expectedName)
+                continue
+            if StrLower(GetUiaControlTypeText(element)) != expectedLocalizedType
                 continue
             count += 1
         }
