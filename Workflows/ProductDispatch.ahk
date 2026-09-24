@@ -97,3 +97,15 @@ RunManualChatGptOutputPaste() {
     return succeeded
 }
 
+RunDisplayOnWebsiteAppWorkflow() {
+    global cmsWinTitle
+
+    ActivateWindow(cmsWinTitle)
+    ClickPoint("overview_tab", 500)
+    ClickPoint("display_on_website_button", 200)
+    ClickPoint("display_on_app_button", 200)
+    ClickPoint("product_save_button", 1000)
+    Flash("Display on Website and Display on App were clicked, then the product was saved.", 3000)
+    return true
+}
+
