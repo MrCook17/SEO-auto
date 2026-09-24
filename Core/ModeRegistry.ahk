@@ -3,14 +3,14 @@ ValidateSeoAutomationMode() {
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'department', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text' or 'promotion_text_reference'.")
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'department', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text', 'promotion_text_reference' or 'display_on_website_app'.")
     }
     if !IsValidSeoPromptForMode(mode, GetSeoPromptId())
         throw Error("Invalid SEO prompt '" SeoPromptId "' for mode '" mode "'. Prompt choices cannot be shared across modes.")
 }
 
 GetSeoAutomationModeOptions() {
-    return ["full", "department", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text", "promotion_text_reference"]
+    return ["full", "department", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text", "promotion_text_reference", "display_on_website_app"]
 }
 
 IsValidSeoAutomationMode(mode) {
@@ -68,7 +68,7 @@ GetSeoPromptOptionsForMode(mode) {
             return [Map("id", "botz_engobes", "label", "BOTZ engobes", "path", BotzPromptTemplatePath)]
         case "figuredart":
             return [Map("id", "figuredart_standard", "label", "Figured'Art product creation", "path", FiguredArtDefaultPromptTemplatePath)]
-        case "promotion_text", "promotion_text_reference":
+        case "promotion_text", "promotion_text_reference", "display_on_website_app":
             return []
     }
     return []
@@ -173,6 +173,10 @@ IsPromotionTextMode() {
 
 IsPromotionTextReferenceMode() {
     return GetSeoAutomationMode() = "promotion_text_reference"
+}
+
+IsDisplayOnWebsiteAppMode() {
+    return GetSeoAutomationMode() = "display_on_website_app"
 }
 
 IsAnyPromotionTextMode() {

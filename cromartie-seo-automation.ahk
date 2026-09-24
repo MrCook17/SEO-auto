@@ -76,6 +76,7 @@ departmentChatgptWinTitle := "Tools"
 ; "promotion_text" = paste the configured promotional text into Description and Custom
 ; "promotion_text_reference" = find every Simple Product (Reference) on the
 ; current catalogue page, reopen each by stock-code search and paste the same text
+; "display_on_website_app" = enable both display controls and save the product
 ; This is the fallback used by older settings files. Saving the
 ; Ctrl+Shift+NumLock menu persists the selected mode and its active prompt
 ; across reloads.
@@ -295,6 +296,8 @@ coords := Map(
     ; Overview tab
     "product_name", [923, 374],
     "stock_code", [456, 484],
+    "display_on_website_button", [350, 708],
+    "display_on_app_button", [340, 734],
     ; Description tab
     "meta_title", [874, 383],
     "html_snippet", [876, 553],
@@ -529,7 +532,10 @@ OpenProductBuildPromptAndPasteToChatGPT() {
             throw Error("NumpadEnter is not used for matrix-image mode. Open the matrix parent and press Numpad4.")
 
         ClickPoint("product_edit_button", 1500)
-        if IsPromotionTextMode() {
+        if IsDisplayOnWebsiteAppMode() {
+            RunDisplayOnWebsiteAppWorkflow()
+            return
+        } else if IsPromotionTextMode() {
             RunPromotionTextWorkflow()
             return
         } else if IsSupplierProductCreationMode()
@@ -570,6 +576,8 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
     pageUrl := hardcodedPageUrl
     if IsPromotionTextReferenceMode()
         return RunPromotionTextReferenceWorkflow()
+    if IsDisplayOnWebsiteAppMode()
+        return RunDisplayOnWebsiteAppWorkflow()
     if IsPromotionTextMode()
         return RunPromotionTextWorkflow()
     if IsSupplierProductCreationMode()
@@ -1398,8 +1406,6 @@ GetImageGalleryCardControlCounts(scope) {
 
 CountExactImageGalleryElements(scope, expectedName, typeName) {
     count := 0
-    ; UIA's Image control type is localised by Chrome as "graphic".
-    expectedLocalizedType := StrLower(typeName) = "image" ? "graphic" : StrLower(typeName)
     condition := expectedName = ""
         ? { Type: typeName }
         : { Name: expectedName, Type: typeName, mm: 2, cs: 0 }
@@ -1410,8 +1416,6 @@ CountExactImageGalleryElements(scope, expectedName, typeName) {
     for _, element in elements {
         try {
             if expectedName != "" && StrLower(Trim(element.Name)) != StrLower(expectedName)
-                continue
-            if StrLower(GetUiaControlTypeText(element)) != expectedLocalizedType
                 continue
             count += 1
         }
@@ -2190,6 +2194,18 @@ RunPromotionTextWorkflow() {
     } else {
         Flash("Description and Custom promotional fields " fieldAction ".`nTEST MODE: the product was not saved.", 3500)
     }
+    return true
+}
+
+RunDisplayOnWebsiteAppWorkflow() {
+    global cmsWinTitle
+
+    ActivateWindow(cmsWinTitle)
+    ClickPoint("overview_tab", 500)
+    ClickPoint("display_on_website_button", 200)
+    ClickPoint("display_on_app_button", 200)
+    ClickPoint("product_save_button", 1000)
+    Flash("Display on Website and Display on App were clicked, then the product was saved.", 3000)
     return true
 }
 
