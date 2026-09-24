@@ -3,7 +3,6 @@
 
 #Include "UIA-v2\Lib\UIA.ahk"
 #Include "UIA-v2\Lib\UIA_Browser.ahk"
-#Include "lib\figuredart-product-creation.ahk"
 
 SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"

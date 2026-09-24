@@ -3,14 +3,14 @@ ValidateSeoAutomationMode() {
     mode := GetSeoAutomationMode()
 
     if !IsValidSeoAutomationMode(mode) {
-        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'department', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'figuredart', 'promotion_text', 'promotion_text_reference' or 'display_on_website_app'.")
+        throw Error("Invalid SeoAutomationMode: " SeoAutomationMode ". Use 'full', 'department', 'metadata', 'image', 'matrix_image', 'matrix_full', 'botz', 'promotion_text', 'promotion_text_reference' or 'display_on_website_app'.")
     }
     if !IsValidSeoPromptForMode(mode, GetSeoPromptId())
         throw Error("Invalid SEO prompt '" SeoPromptId "' for mode '" mode "'. Prompt choices cannot be shared across modes.")
 }
 
 GetSeoAutomationModeOptions() {
-    return ["full", "department", "metadata", "image", "matrix_image", "matrix_full", "botz", "figuredart", "promotion_text", "promotion_text_reference", "display_on_website_app"]
+    return ["full", "department", "metadata", "image", "matrix_image", "matrix_full", "botz", "promotion_text", "promotion_text_reference", "display_on_website_app"]
 }
 
 IsValidSeoAutomationMode(mode) {
@@ -45,7 +45,7 @@ GetSeoPromptOptionsForMode(mode) {
     global FullPromptTemplatePath, FullToolsPromptTemplatePath
     global DepartmentPromptTemplatePath, MetadataPromptTemplatePath, ImageOnlyPromptTemplatePath
     global MatrixImagePromptTemplatePath, MatrixFullPromptTemplatePath
-    global BotzPromptTemplatePath, FiguredArtDefaultPromptTemplatePath
+    global BotzPromptTemplatePath
 
     mode := StrLower(Trim(mode))
     switch mode {
@@ -66,8 +66,6 @@ GetSeoPromptOptionsForMode(mode) {
             return [Map("id", "matrix_full_standard", "label", "Standard matrix full", "path", MatrixFullPromptTemplatePath)]
         case "botz":
             return [Map("id", "botz_engobes", "label", "BOTZ engobes", "path", BotzPromptTemplatePath)]
-        case "figuredart":
-            return [Map("id", "figuredart_standard", "label", "Figured'Art product creation", "path", FiguredArtDefaultPromptTemplatePath)]
         case "promotion_text", "promotion_text_reference", "display_on_website_app":
             return []
     }
@@ -163,10 +161,6 @@ IsBotzMode() {
     return GetSeoAutomationMode() = "botz"
 }
 
-IsFiguredArtMode() {
-    return GetSeoAutomationMode() = "figuredart"
-}
-
 IsPromotionTextMode() {
     return GetSeoAutomationMode() = "promotion_text"
 }
@@ -184,7 +178,7 @@ IsAnyPromotionTextMode() {
 }
 
 IsSupplierProductCreationMode() {
-    return IsBotzMode() || IsFiguredArtMode()
+    return IsBotzMode()
 }
 
 IsAnyMatrixMode() {

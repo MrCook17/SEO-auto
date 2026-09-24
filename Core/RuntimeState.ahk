@@ -8,7 +8,6 @@
 ; "matrix_image" = image SEO for every child of one matrix product
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
 ; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
-; "figuredart" = Figured'Art Product Creation from the matching C:\FiguredArt product folder
 ; "promotion_text" = paste the configured promotional text into Description and Custom
 ; "promotion_text_reference" = find every Simple Product (Reference) on the
 ; current catalogue page, reopen each by stock-code search and paste the same text
@@ -21,15 +20,9 @@ SeoAutomationMode := "full"
 ; validated against that mode before a template can be loaded.
 SeoPromptId := "full_standard"
 
-; The supplier library reads this active path directly so it remains usable by
-; its standalone tests. ApplySharedSeoPromptSettings keeps it in sync with the
-; mode-scoped prompt selection.
-FiguredArtPromptTemplatePath := FiguredArtDefaultPromptTemplatePath
-
 global matrixState := 0
 global matrixFullState := 0
 global botzState := 0
-global figuredArtState := 0
 global botzPromptSettings := 0
 global botzPromptSettingsGui := 0
 global promotionText := ""

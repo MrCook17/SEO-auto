@@ -14,7 +14,6 @@ Run `cromartie-seo-automation.ahk` from the repository root. Keep the relative f
 - `Workflows/` — product dispatch, automatic completion, Department batching and CMS-to-ChatGPT image transfer
 - `UI/` — commands, settings GUI and static hotkey declarations
 - `prompts/` — ChatGPT prompt templates used by each automation mode
-- `lib/figuredart-product-creation.ahk` — Figured'Art mode implementation retained at its standalone-test-compatible path
 - `docs/` — configuration notes and SEO guidance
 - `state/` — persisted settings and recoverable supplier/Matrix workflow snapshots
 - `tools/` — standalone AutoHotkey helper and diagnostic scripts
@@ -51,14 +50,13 @@ The root script is intentionally only a bootstrap. It owns the directives, vendo
 | `Ctrl+Alt+R` | Reload the script |
 | `Escape` | Exit the script |
 
-## Supplier scrapers
+## Supplier scraper
 
 - `tools/botz-scraper/` — the existing BOTZ supplier workflow
-- `tools/figuredart-scraper/` — the separate PDF-driven Figured'Art workflow; see its README for installation, staged validation, full-run, retry, and resume commands
 
 ## Department automation
 
-Department automation uses whichever standard `SeoAutomationMode` is selected (`full`, `department`, `metadata`, `image`, `matrix_image`, `matrix_full`, `botz`, `figuredart`, `promotion_text`, or `display_on_website_app`) and runs that mode's complete workflow only for its matching catalogue product type. `matrix_image` and `matrix_full` process `Matrix Product` rows and skip `Matrix SKU`, `Simple Product`, and `Department` rows; matrix parents are identified exclusively by Product Name because they do not have stock codes. The other standard modes process `Simple Product` rows. Press `Ctrl+Alt+D` to enable it, open the first matching product, and press `Ctrl+Numpad4` to start. Press `Ctrl+Numpad6` to stop safely after the current product. `promotion_text_reference` is a separate catalogue-search batch and does not use the department toggle.
+Department automation uses whichever standard `SeoAutomationMode` is selected (`full`, `department`, `metadata`, `image`, `matrix_image`, `matrix_full`, `botz`, `promotion_text`, or `display_on_website_app`) and runs that mode's complete workflow only for its matching catalogue product type. `matrix_image` and `matrix_full` process `Matrix Product` rows and skip `Matrix SKU`, `Simple Product`, and `Department` rows; matrix parents are identified exclusively by Product Name because they do not have stock codes. The other standard modes process `Simple Product` rows. Press `Ctrl+Alt+D` to enable it, open the first matching product, and press `Ctrl+Numpad4` to start. Press `Ctrl+Numpad6` to stop safely after the current product. `promotion_text_reference` is a separate catalogue-search batch and does not use the department toggle.
 
 ## SEO prompt settings
 
@@ -72,9 +70,7 @@ In `display_on_website_app` mode, `NumpadEnter` opens the selected catalogue pro
 
 The same menu has a persistent **Testing mode** checkbox. When enabled, the automation writes a timestamped session trace, image-gallery count samples, relevant UIA element dumps, full accessibility trees at accepted image counts and failures, window state, coordinate actions, field verification results, and error details to `debug/`. Leave it off for normal runs; enable it before reproducing an intermittent problem and retain the matching `testing-session-*.log.txt` plus `testing-*-accessibility-tree.txt`/`testing-*-uia-element.txt` files.
 
-`figuredart` follows the BOTZ product-creation sequence using `C:\FiguredArt`: it matches the open GO b2b stock code to an exact Figured'Art product-code folder, validates the successful `product.md`, attaches every current image in filename order, requests the Figured'Art-specific automation output, uploads the images with their generated CMS metadata, fills the product content and safely resumes from its own state file.
-
-All modes process a maximum of 11 GO b2b image records per product. BOTZ and Figured'Art attach every supported image in the supplier folder to ChatGPT with `Ctrl+A`, avoiding fragile long filename lists. Their prompts request image fields only for the naturally sorted first 11 images, and only those first 11 are parsed, uploaded and edited in GO b2b. Later attachments are reference context only. Ordinary and matrix modes likewise cap detected gallery work at the first 11 image records.
+All modes process a maximum of 11 GO b2b image records per product. BOTZ attaches every supported image in the supplier folder to ChatGPT with `Ctrl+A`, avoiding fragile long filename lists. Its prompt requests image fields only for the naturally sorted first 11 images, and only those first 11 are parsed, uploaded and edited in GO b2b. Later attachments are reference context only. Ordinary and matrix modes likewise cap detected gallery work at the first 11 image records.
 
 Ordinary and matrix modes actively visit each available five-image carousel page while counting, because GO b2b can omit an unvisited third page from the accessibility tree. The detector keeps the highest realised total instead of summing retained pages. Each count sample checks the four expected control groups and re-verifies every returned element's localised UIA control type; Chrome exposes an Image control as `graphic`. Keep this explicit verification when changing gallery discovery, because the stable-count decision depends on those control counts agreeing. Attachment batches then open the gallery once, traverse sequentially, wait one second before each copy, and use Chrome's context-menu **Copy image** action on the high-quality preview. Each ChatGPT paste is confirmed from the draft's accessibility-tree attachment count before the batch continues. GO b2b image-metadata insertion verifies every carousel transition, opens the visible **Details** control through UIA, confirms the Title and Alt fields appeared before pasting, and waits for the gallery to return after every image Save.
 
@@ -90,7 +86,6 @@ Current persisted formats are:
 - `state/botz-product-state.txt` — writer uses `CROMARTIE_BOTZ_STATE_V3`; loader also supports V2
 - `state/matrix-image-state.txt` — current writer and loader use `CROMARTIE_MATRIX_STATE_V3`
 - `state/matrix-full-state.txt` — `CROMARTIE_MATRIX_FULL_STATE_V3`
-- `state/figuredart-product-state.txt` — `CROMARTIE_FIGUREDART_STATE_V1`
 
 The checked-in `state/matrix-image-state.txt` is a historical V1 snapshot for the Wallie Christmas Tree matrix parent. Current code neither generates nor loads V1. It contains only the old shared image count and parent/child discovery context, with no completion or upload-progress record. Archive or retire that stale snapshot separately if it is no longer required; do not make the V3 loader accept its header without an explicit schema conversion, because V1 lacks the current parent-image count, per-child image counts and connected-size fields.
 
@@ -136,14 +131,7 @@ Run the non-destructive checks from the repository root after every change:
 ```powershell
 & 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut /Validate '.\cromartie-seo-automation.ahk'
 & 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut /Validate '.\test\test.ahk'
-& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut /Validate '.\test\figuredart-mode-test.ahk'
-& 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut '.\test\figuredart-mode-test.ahk'
-
 Push-Location '.\tools\botz-scraper'
-npm.cmd test
-Pop-Location
-
-Push-Location '.\tools\figuredart-scraper'
 npm.cmd test
 Pop-Location
 

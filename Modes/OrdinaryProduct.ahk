@@ -102,11 +102,6 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
             return true
         }
 
-        if IsFiguredArtMode() {
-            PasteFiguredArtOutputToCms()
-            return true
-        }
-
         ValidateImageTargetConfig()
 
         if IsMatrixFullMode() {

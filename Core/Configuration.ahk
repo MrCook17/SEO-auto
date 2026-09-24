@@ -48,7 +48,6 @@ MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
 MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
 ; BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
 BotzPromptTemplatePath := promptDir "\prompt-template-botz-engobes.md"
-FiguredArtDefaultPromptTemplatePath := promptDir "\prompt-template-figuredart.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
@@ -59,10 +58,8 @@ debugDir := A_ScriptDir "\debug"
 matrixStateFilePath := stateDir "\matrix-image-state.txt"
 matrixFullStateFilePath := stateDir "\matrix-full-state.txt"
 botzStateFilePath := stateDir "\botz-product-state.txt"
-figuredArtStateFilePath := stateDir "\figuredart-product-state.txt"
 botzPromptSettingsFilePath := stateDir "\botz-prompt-settings.txt"
 botzRootDir := "C:\BOTZ\engobes"
-figuredArtRootDir := "C:\FiguredArt"
 botzFilePickerTimeoutMs := 10000
 botzChatPickerFolderLoadMs := 2500
 botzChatPickerSelectAllMs := 1500

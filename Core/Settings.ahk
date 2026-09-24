@@ -13,13 +13,11 @@ InitialiseSeoPromptSettings() {
 
 ApplySharedSeoPromptSettings(settings) {
     global SeoAutomationMode, SeoPromptId, hardcodedPageUrl, requiredInternalLinksDefault, additionalProductNotesDefault, promotionText
-    global testingModeEnabled, FiguredArtPromptTemplatePath, FiguredArtDefaultPromptTemplatePath
+    global testingModeEnabled
 
     testingWasEnabled := testingModeEnabled
     SeoAutomationMode := settings["seoAutomationMode"]
     SeoPromptId := settings["seoPromptId"]
-    figuredArtOption := GetSeoPromptOption("figuredart", SeoAutomationMode = "figuredart" ? SeoPromptId : GetDefaultSeoPromptId("figuredart"))
-    FiguredArtPromptTemplatePath := IsObject(figuredArtOption) ? figuredArtOption["path"] : FiguredArtDefaultPromptTemplatePath
     hardcodedPageUrl := settings["pageUrl"]
     requiredInternalLinksDefault := BuildBotzRecommendedInlinks(settings)
     additionalProductNotesDefault := settings["additionalNotes"] != "" ? settings["additionalNotes"] : "NONE"
