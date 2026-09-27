@@ -101,7 +101,7 @@ BuildBotzRecommendedInlinks(settings) {
     return text
 }
 
-BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0, attachmentImageFiles := 0) {
+BuildSupplierProductPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0, attachmentImageFiles := 0, supplierName := "supplier") {
     if !IsObject(promptSettings)
         promptSettings := CreateDefaultBotzPromptSettings()
     if !IsObject(attachmentImageFiles)
@@ -120,7 +120,7 @@ BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles,
     ]
     for _, marker in requiredMarkers {
         if !InStr(template, marker)
-            throw Error("The BOTZ prompt template is missing the required marker " marker ".")
+            throw Error("The " supplierName " prompt template is missing the required marker " marker ".")
     }
 
     imageOrder := ""
@@ -148,6 +148,10 @@ BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles,
     for marker, value in replacements
         prompt := StrReplace(prompt, marker, value)
     return prompt
+}
+
+BuildBotzPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings := 0, attachmentImageFiles := 0) {
+    return BuildSupplierProductPromptFromSource(template, pageUrl, productName, productMd, imageFiles, promptSettings, attachmentImageFiles, "BOTZ")
 }
 
 InjectImageOnlyOutputFields(prompt, imageCount) {

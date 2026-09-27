@@ -1,16 +1,22 @@
-﻿CROMARTIE_BOTZ_STATE_V3
-product_name	ENGOBE RED 800ML
-stock_code	B90618
-match_code	9061
-folder	C:\BOTZ\engobes\9061 Engobe red
-product_md	C:\BOTZ\engobes\9061 Engobe red\product.md
-product_md_size	1317
-product_md_modified	20260813143547
+﻿CROMARTIE_SUPPLIER_PRODUCT_STATE_V1
+mode	supplier_product
+submode	crystal_art
+product_name	Donkey, Crystal Art Festive Buddy
+stock_code	CAFGR-34NBC125
+match_code	CAFGR-34NBC125
+folder	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek
+product_md	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\product.md
+product_md_size	2131
+product_md_modified	20260925151251
 initial_gallery_count	0
-uploaded_count	4
-pending_image	0
-image_count	4
-image	1	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_01.jpg	72843	20260813145851
-image	2	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_02.jpg	190778	20260813143546
-image	3	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_03.jpg	203184	20260813143547
-image	4	C:\BOTZ\engobes\9061 Engobe red\images\9061_engobe-red_04.jpg	63987	20260813145853
+uploaded_count	3
+pending_image	4
+image_count	8
+image	1	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_01.jpg	73752	20260925151245
+image	2	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_02.jpg	135313	20260925151246
+image	3	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_03.jpg	158579	20260925151247
+image	4	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_04.jpg	68525	20260925151248
+image	5	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_05.jpg	77242	20260925151248
+image	6	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_06.jpg	139736	20260925151249
+image	7	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_07.jpg	109502	20260925151250
+image	8	C:\Crystal Art\CAFGR-34NBC125 Donkey Crystal Art Festive Buddies Kit Series 8 Shrek\images\CAFGR-34NBC125_donkey-crystal-art-festive-buddies-kit-series-8-shrek_08.jpg	104636	20260925151251

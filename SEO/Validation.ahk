@@ -72,17 +72,21 @@ ValidateCmsImageName(value, imageIndex) {
     return value
 }
 
-ValidateBotzHtml(htmlSnippet) {
+ValidateSupplierProductHtml(htmlSnippet, supplierName := "Supplier product") {
     if CleanText(htmlSnippet) = ""
-        throw Error("BOTZ HTML snippet is empty.")
+        throw Error(supplierName " HTML snippet is empty.")
     if !InStr(htmlSnippet, "<")
-        throw Error("BOTZ HTML snippet does not look like HTML.")
+        throw Error(supplierName " HTML snippet does not look like HTML.")
     if InStr(htmlSnippet, "{{") || InStr(htmlSnippet, "}}")
-        throw Error("BOTZ HTML snippet contains placeholder text.")
+        throw Error(supplierName " HTML snippet contains placeholder text.")
     if RegExMatch(htmlSnippet, "i)(oaicite|contentReference|:source\[|\[citation)")
-        throw Error("BOTZ HTML snippet contains citation/source-token text.")
+        throw Error(supplierName " HTML snippet contains citation/source-token text.")
     if InStr(htmlSnippet, Chr(96) Chr(96) Chr(96))
-        throw Error("BOTZ HTML snippet still contains a code fence.")
+        throw Error(supplierName " HTML snippet still contains a code fence.")
+}
+
+ValidateBotzHtml(htmlSnippet) {
+    return ValidateSupplierProductHtml(htmlSnippet, "BOTZ")
 }
 
 ValidateImageOutputValue(value, fieldName) {

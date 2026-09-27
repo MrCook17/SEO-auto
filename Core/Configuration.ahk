@@ -48,6 +48,7 @@ MatrixImagePromptTemplatePath := promptDir "\prompt-template-matrix-image.md"
 MatrixFullPromptTemplatePath := promptDir "\prompt-template-matrix-full.md"
 ; BotzPromptTemplatePath := promptDir "\prompt-template-botz.md"
 BotzPromptTemplatePath := promptDir "\prompt-template-botz-engobes.md"
+CrystalArtPromptTemplatePath := promptDir "\prompt-template-crystal-art.md"
 
 ; Kept as a familiar reference for the existing full workflow.
 ; promptTemplatePath := MetadataPromptTemplatePath
@@ -60,6 +61,7 @@ matrixFullStateFilePath := stateDir "\matrix-full-state.txt"
 botzStateFilePath := stateDir "\botz-product-state.txt"
 botzPromptSettingsFilePath := stateDir "\botz-prompt-settings.txt"
 botzRootDir := "C:\BOTZ\engobes"
+crystalArtRootDir := "C:\Crystal Art"
 botzFilePickerTimeoutMs := 10000
 botzChatPickerFolderLoadMs := 2500
 botzChatPickerSelectAllMs := 1500
@@ -222,8 +224,8 @@ coords := Map(
     "image_alt", [948, 684],
     "image_save_button", [1250, 734],
     ; ChatGPT
-    "chat_input", [2323, 1018],
-    "chat_add_button", [2246, 1026],
-    "chat_add_attachments_button", [2393, 566]
+    "chat_input", [2256, 949],
+    "chat_add_button", [2233, 995],
+    "chat_add_attachments_button", [2411, 419]
     ; "chat_input", [2102, 972] ; x: 2102, y: 972
 )

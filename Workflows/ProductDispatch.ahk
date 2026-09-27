@@ -74,8 +74,8 @@ RunOpenProductWorkflow(forceAutomaticCompletion := false) {
 }
 
 BuildSupplierProductCreationPrompt(pageUrl) {
-    if IsBotzMode()
-        return BuildBotzPrompt(pageUrl)
+    if IsSupplierProductCreationMode()
+        return BuildSupplierProductPrompt(pageUrl)
     throw Error("The current SEO mode is not a supplier product-creation mode.")
 }
 

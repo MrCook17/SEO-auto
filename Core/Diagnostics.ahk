@@ -47,7 +47,7 @@ TestingLog(eventName, details := "") {
 }
 
 BuildTestingRuntimeSummary() {
-    global SeoAutomationMode, imageCountToProcess, maximumImagesPerProduct
+    global SeoAutomationMode, SeoSubmodeId, SeoPromptId, imageCountToProcess, maximumImagesPerProduct
     global imageTabLoadDelayMs, imageGalleryAvailabilityTimeoutMs, imageGalleryCountTimeoutMs
     global imageGalleryCountStableDurationMs, imageGalleryMinimumObservationMs
     global imageGalleryPageChangeTimeoutMs, imageGalleryFirstPageNoChangeTimeoutMs
@@ -66,6 +66,8 @@ BuildTestingRuntimeSummary() {
         . "`nProcess admin: " (A_IsAdmin ? "yes" : "no")
         . "`nScreen: " A_ScreenWidth "x" A_ScreenHeight
         . "`nSEO mode: " SeoAutomationMode
+        . "`nSEO submode: " SeoSubmodeId
+        . "`nSEO prompt: " SeoPromptId
         . "`nCurrent image count: " imageCountToProcess
         . "`nMaximum images: " maximumImagesPerProduct
         . "`nImages-tab fixed delay ms: " imageTabLoadDelayMs

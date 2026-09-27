@@ -97,8 +97,8 @@ PasteCopiedChatGPTOutputToCms(copyLatestResponse := true) {
         if copyLatestResponse
             CopyLatestChatGptResponseToClipboard()
 
-        if IsBotzMode() {
-            PasteBotzOutputToCms()
+        if IsSupplierProductCreationMode() {
+            PasteSupplierProductOutputToCms()
             return true
         }
 

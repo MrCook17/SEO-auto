@@ -7,7 +7,8 @@
 ; "image" = image SEO for one ordinary product
 ; "matrix_image" = image SEO for every child of one matrix product
 ; "matrix_full" = parent metadata plus child HTML and image SEO for one matrix product
-; "botz" = BOTZ Product Creation from the matching C:\BOTZ product folder
+; "supplier_product" = product creation from a supplier folder; select BOTZ
+; or Crystal Art with SeoSubmodeId
 ; "promotion_text" = paste the configured promotional text into Description and Custom
 ; "promotion_text_reference" = find every Simple Product (Reference) on the
 ; current catalogue page, reopen each by stock-code search and paste the same text
@@ -16,8 +17,11 @@
 ; Ctrl+Shift+NumLock menu persists the selected mode and its active prompt
 ; across reloads.
 SeoAutomationMode := "full"
+; Most modes have an implicit/default submode. Supplier product creation exposes
+; selectable BOTZ and Crystal Art submodes in the settings UI.
+SeoSubmodeId := "default"
 ; Prompt choices are scoped to their owning mode. The saved prompt ID is
-; validated against that mode before a template can be loaded.
+; validated against that mode and submode before a template can be loaded.
 SeoPromptId := "full_standard"
 
 global matrixState := 0

@@ -97,7 +97,10 @@ CountTextOccurrences(text, needle) {
     return count
 }
 
-ParseBotzAutomationOutput(block, state) {
+ParseSupplierProductAutomationOutput(block, state, profile := 0) {
+    if !IsObject(profile)
+        profile := GetSupplierProductProfile(state["submode"])
+    supplierName := profile["displayName"]
     expected := ["MODE", "PRODUCT_NAME", "IMAGE_COUNT", "PRODUCT_NAME_RECOMMENDATION", "META_TITLE", "META_DESCRIPTION", "HTML_SNIPPET"]
     Loop state["imageCount"] {
         expected.Push("IMAGE_" A_Index "_NAME")
@@ -106,20 +109,20 @@ ParseBotzAutomationOutput(block, state) {
     }
     fields := ParseOrderedAutomationFields(block, expected)
 
-    mode := ValidateMatrixFullOneLine(fields["MODE"], "BOTZ mode")
-    if mode != "BOTZ_PRODUCT_CREATION"
-        throw Error("BOTZ output MODE must be BOTZ_PRODUCT_CREATION.")
-    echoedName := ValidateMatrixFullOneLine(fields["PRODUCT_NAME"], "BOTZ product name")
+    mode := ValidateMatrixFullOneLine(fields["MODE"], supplierName " mode")
+    if mode != profile["outputMode"]
+        throw Error(supplierName " output MODE must be " profile["outputMode"] ".")
+    echoedName := ValidateMatrixFullOneLine(fields["PRODUCT_NAME"], supplierName " product name")
     if NormaliseHarmlessWhitespace(echoedName) != NormaliseHarmlessWhitespace(state["productName"])
-        throw Error("The BOTZ output product name does not match the saved GO b2b product name.")
+        throw Error("The " supplierName " output product name does not match the saved GO b2b product name.")
     if !IsInteger(fields["IMAGE_COUNT"]) || Integer(fields["IMAGE_COUNT"]) != state["imageCount"]
-        throw Error("The BOTZ output image count does not match the current BOTZ image folder.")
+        throw Error("The " supplierName " output image count does not match the current supplier image folder.")
 
     recommendation := ValidateMatrixFullOneLine(fields["PRODUCT_NAME_RECOMMENDATION"], "Product name recommendation")
     metaTitle := ValidateMatrixFullOneLine(fields["META_TITLE"], "Meta title")
     metaDescription := ValidateMatrixFullOneLine(fields["META_DESCRIPTION"], "Meta description")
     htmlSnippet := StripCodeFence(fields["HTML_SNIPPET"])
-    ValidateBotzHtml(htmlSnippet)
+    ValidateSupplierProductHtml(htmlSnippet, supplierName)
 
     imageNames := [], imageTitles := [], imageAlts := []
     Loop state["imageCount"] {
@@ -136,7 +139,7 @@ ParseBotzAutomationOutput(block, state) {
 
     warnings := ValidateGeneratedFields(metaTitle, metaDescription, htmlSnippet, imageTitles, imageAlts, true)
     if warnings != ""
-        throw Error("BOTZ generated-field validation failed:`n" warnings)
+        throw Error(supplierName " generated-field validation failed:`n" warnings)
 
     return Map(
         "mode", mode,
@@ -149,6 +152,10 @@ ParseBotzAutomationOutput(block, state) {
         "imageTitles", imageTitles,
         "imageAlts", imageAlts
     )
+}
+
+ParseBotzAutomationOutput(block, state) {
+    return ParseSupplierProductAutomationOutput(block, state, GetSupplierProductProfile("botz"))
 }
 
 ParseOrderedAutomationFields(block, expectedLabels) {

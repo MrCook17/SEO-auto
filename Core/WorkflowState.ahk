@@ -1,6 +1,8 @@
 SaveBotzState(state) {
     global botzStateFilePath
-    text := "CROMARTIE_BOTZ_STATE_V3`n"
+    text := "CROMARTIE_SUPPLIER_PRODUCT_STATE_V1`n"
+    text .= "mode`tsupplier_product`n"
+    text .= "submode`t" EncodeStateValue(state["submode"]) "`n"
     text .= "product_name`t" EncodeStateValue(state["productName"]) "`n"
     text .= "stock_code`t" EncodeStateValue(state["stockCode"]) "`n"
     text .= "match_code`t" state["matchCode"] "`n"
@@ -26,12 +28,13 @@ LoadBotzState() {
     if botzState
         return botzState
     if !FileExist(botzStateFilePath)
-        throw Error("No saved BOTZ run exists. Build the BOTZ prompt with Numpad4 first.")
+        throw Error("No saved supplier-product run exists. Build its prompt with Numpad4 first.")
 
     lines := StrSplit(StrReplace(FileRead(botzStateFilePath, "UTF-8"), "`r", ""), "`n")
-    if lines.Length < 10 || (lines[1] != "CROMARTIE_BOTZ_STATE_V2" && lines[1] != "CROMARTIE_BOTZ_STATE_V3")
-        throw Error("The saved BOTZ state file is invalid or unsupported.")
+    if lines.Length < 10 || (lines[1] != "CROMARTIE_BOTZ_STATE_V2" && lines[1] != "CROMARTIE_BOTZ_STATE_V3" && lines[1] != "CROMARTIE_SUPPLIER_PRODUCT_STATE_V1")
+        throw Error("The saved supplier-product state file is invalid or unsupported.")
     stateVersion := lines[1]
+    isSupplierState := stateVersion = "CROMARTIE_SUPPLIER_PRODUCT_STATE_V1"
 
     values := Map(), images := [], imageManifest := []
     Loop lines.Length - 1 {
@@ -41,13 +44,13 @@ LoadBotzState() {
         parts := StrSplit(line, "`t")
         if parts[1] = "image" {
             if parts.Length != 5 || !IsInteger(parts[2]) || Integer(parts[2]) != images.Length + 1 || !IsInteger(parts[4])
-                throw Error("The saved BOTZ image order is invalid.")
+                throw Error("The saved supplier-product image order is invalid.")
             imagePath := DecodeStateValue(parts[3])
             images.Push(imagePath)
             imageManifest.Push(Map("path", imagePath, "size", Integer(parts[4]), "modified", parts[5]))
         } else {
             if parts.Length != 2
-                throw Error("The saved BOTZ state contains an invalid record: " line)
+                throw Error("The saved supplier-product state contains an invalid record: " line)
             values[parts[1]] := parts[2]
         }
     }
@@ -55,31 +58,39 @@ LoadBotzState() {
     required := ["product_name", "stock_code", "match_code", "folder", "product_md", "product_md_size", "product_md_modified", "initial_gallery_count", "image_count"]
     for _, key in required {
         if !values.Has(key)
-            throw Error("The saved BOTZ state is missing: " key ".")
+            throw Error("The saved supplier-product state is missing: " key ".")
     }
     if !IsInteger(values["image_count"]) || Integer(values["image_count"]) < 1 || Integer(values["image_count"]) != images.Length
-        throw Error("The saved BOTZ image count is invalid.")
+        throw Error("The saved supplier-product image count is invalid.")
     if Integer(values["image_count"]) > maximumImagesPerProduct
-        throw Error("The saved BOTZ image count exceeds the GO b2b limit of " maximumImagesPerProduct ". Rebuild the BOTZ prompt to select only the first " maximumImagesPerProduct " images.")
-    if stateVersion = "CROMARTIE_BOTZ_STATE_V3" {
+        throw Error("The saved supplier-product image count exceeds the GO b2b limit of " maximumImagesPerProduct ". Rebuild the prompt to select only the first " maximumImagesPerProduct " images.")
+    if stateVersion = "CROMARTIE_BOTZ_STATE_V3" || isSupplierState {
         for _, key in ["uploaded_count", "pending_image"] {
             if !values.Has(key) || !IsInteger(values[key])
-                throw Error("The saved BOTZ state has invalid or missing progress: " key ".")
+                throw Error("The saved supplier-product state has invalid or missing progress: " key ".")
         }
     }
-    uploadedCount := stateVersion = "CROMARTIE_BOTZ_STATE_V3" && values.Has("uploaded_count") && IsInteger(values["uploaded_count"])
+    if isSupplierState {
+        if !values.Has("mode") || values["mode"] != "supplier_product"
+            throw Error("The saved supplier-product state has an invalid mode.")
+        if !values.Has("submode") || !IsValidSeoSubmodeForMode("supplier_product", DecodeStateValue(values["submode"]))
+            throw Error("The saved supplier-product state has an invalid submode.")
+    }
+    submodeId := isSupplierState ? DecodeStateValue(values["submode"]) : "botz"
+    uploadedCount := (stateVersion = "CROMARTIE_BOTZ_STATE_V3" || isSupplierState) && values.Has("uploaded_count") && IsInteger(values["uploaded_count"])
         ? Integer(values["uploaded_count"])
         : 0
-    pendingImageIndex := stateVersion = "CROMARTIE_BOTZ_STATE_V3" && values.Has("pending_image") && IsInteger(values["pending_image"])
+    pendingImageIndex := (stateVersion = "CROMARTIE_BOTZ_STATE_V3" || isSupplierState) && values.Has("pending_image") && IsInteger(values["pending_image"])
         ? Integer(values["pending_image"])
         : 0
     if uploadedCount < 0 || uploadedCount > Integer(values["image_count"])
-        throw Error("The saved BOTZ uploaded-image progress is invalid.")
+        throw Error("The saved supplier-product uploaded-image progress is invalid.")
     if pendingImageIndex < 0 || pendingImageIndex > Integer(values["image_count"])
-        throw Error("The saved BOTZ pending-image progress is invalid.")
+        throw Error("The saved supplier-product pending-image progress is invalid.")
 
     botzState := Map(
-        "mode", "botz",
+        "mode", "supplier_product",
+        "submode", submodeId,
         "productName", DecodeStateValue(values["product_name"]),
         "stockCode", DecodeStateValue(values["stock_code"]),
         "matchCode", values["match_code"],

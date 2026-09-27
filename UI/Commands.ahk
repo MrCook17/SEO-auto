@@ -1,5 +1,5 @@
 TestScript() {
-    global useRecommendedProductName, SeoAutomationMode, SeoPromptId, imageCountToProcess
+    global useRecommendedProductName, SeoAutomationMode, SeoSubmodeId, SeoPromptId, imageCountToProcess
     global fullWorkflowAutomationEnabled, automaticWorkflowActive
     global departmentAutomationEnabled, departmentAutomationActive
     global departmentStopAfterCurrent, testingModeEnabled, testingSessionLogPath
@@ -25,7 +25,8 @@ TestScript() {
         savedMode := savedState["mode"]
     }
     MsgBox "SEO mode: " SeoAutomationMode
-        . "`nSEO prompt: " SeoPromptId " (" GetSeoPromptLabel(GetSeoAutomationMode(), GetSeoPromptId()) ")"
+        . "`nSEO submode: " SeoSubmodeId " (" GetSeoSubmodeLabel(GetSeoAutomationMode(), GetSeoSubmodeId()) ")"
+        . "`nSEO prompt: " SeoPromptId " (" GetSeoPromptLabel(GetSeoAutomationMode(), GetSeoSubmodeId(), GetSeoPromptId()) ")"
         . "`nImages: " imageCountToProcess
         . "`nRecommended product-name insertion: " nameMode
         . "`n" automationLabel " (Ctrl+Alt+A): " automationMode " (" automationStatus ")"

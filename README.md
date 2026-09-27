@@ -10,7 +10,7 @@ Run `cromartie-seo-automation.ahk` from the repository root. Keep the relative f
 - `CMS/` — product fields, catalogue traversal, image handling, UIA controls and Matrix discovery/navigation
 - `Helpers/` — text and supplier-file helpers
 - `SEO/` — ChatGPT output parsing and validation
-- `Modes/` — ordinary, BOTZ, promotion and Matrix mode implementations
+- `Modes/` — ordinary, supplier-product, promotion and Matrix mode implementations
 - `Workflows/` — product dispatch, automatic completion, Department batching and CMS-to-ChatGPT image transfer
 - `UI/` — commands, settings GUI and static hotkey declarations
 - `prompts/` — ChatGPT prompt templates used by each automation mode
@@ -57,11 +57,15 @@ The root script is intentionally only a bootstrap. It owns the directives, vendo
 
 ## Department automation
 
-Department automation uses whichever standard `SeoAutomationMode` is selected (`full`, `department`, `metadata`, `image`, `matrix_image`, `matrix_full`, `botz`, `promotion_text`, or `display_on_website_app`) and runs that mode's complete workflow only for its matching catalogue product type. `matrix_image` and `matrix_full` process `Matrix Product` rows and skip `Matrix SKU`, `Simple Product`, and `Department` rows; matrix parents are identified exclusively by Product Name because they do not have stock codes. The other standard modes process `Simple Product` rows. Press `Ctrl+Alt+D` to enable it, open the first matching product, and press `Ctrl+Numpad4` to start. Press `Ctrl+Numpad6` to stop safely after the current product. `promotion_text_reference` is a separate catalogue-search batch and does not use the department toggle.
+Department automation uses whichever standard `SeoAutomationMode` is selected (`full`, `department`, `metadata`, `image`, `matrix_image`, `matrix_full`, `supplier_product`, `promotion_text`, or `display_on_website_app`) and runs that mode's complete workflow only for its matching catalogue product type. `matrix_image` and `matrix_full` process `Matrix Product` rows and skip `Matrix SKU`, `Simple Product`, and `Department` rows; matrix parents are identified exclusively by Product Name because they do not have stock codes. The other standard modes process `Simple Product` rows. Press `Ctrl+Alt+D` to enable it, open the first matching product, and press `Ctrl+Numpad4` to start. Press `Ctrl+Numpad6` to stop safely after the current product. `promotion_text_reference` is a separate catalogue-search batch and does not use the department toggle.
 
 ## SEO prompt settings
 
-Press `Ctrl+Shift+NumLock` to select `SeoAutomationMode`, then select one of the prompts registered exclusively to that mode. The prompt dropdown updates with the mode, and both selections are persisted. Existing settings files without a saved prompt continue with the mode's original/default prompt. Full mode offers **Standard full product** (`prompts/prompt-template.md`) and **Tools product optimisation** (`prompts/prompt-template-tools-products.md`); both use the same CMS inputs and automation output fields.
+Press `Ctrl+Shift+NumLock` to select `SeoAutomationMode`, its submode and then one of the prompts registered exclusively to that submode. The hierarchy is mode → submode → prompt. Modes that do not need variants expose one disabled **Default** submode. The `supplier_product` mode exposes **BOTZ Engobes** and **Crystal Art**; changing it also changes the source-folder matching rules and available prompt. Existing settings whose mode is `botz` are migrated to `supplier_product` → `botz`. Full mode offers **Standard full product** (`prompts/prompt-template.md`) and **Tools product optimisation** (`prompts/prompt-template-tools-products.md`); both use the same CMS inputs and automation output fields.
+
+The same menu stores the partial window-title matches used for the GO b2b CMS, the standard ChatGPT window and the separate Department ChatGPT window. Press `Ctrl+Alt+W` while a target window is active to copy its exact title, then paste the desired stable portion into the corresponding setting.
+
+The wider two-column menu also persists the main workflow switches: automatic ChatGPT completion, department-wide batch automation, recommended product-name insertion and automatic CMS-image attachment. Department review mode disables the department-wide checkbox because that mode deliberately leaves each product open for manual review. The existing hotkeys remain available for quick session changes.
 
 In `promotion_text` mode, enter the promotional text in the dedicated box; `NumpadEnter` applies it after opening a selected product and `Numpad4` applies it to an already-open product. Leave the box empty to clear the promotional fields in both Description and Custom. In `promotion_text_reference`, start on the catalogue product list and press either `NumpadEnter` or `Numpad4`. The automation scans the accessibility tree for every `Simple Product (Reference)`, stores their stock codes, searches each code in turn, double-clicks the exact matching result, fills or clears both promotional-text fields, and saves before continuing. Press `Ctrl+Numpad6` to stop safely after the current reference product. Both modes require `promotionTextSaveEnabled := true` for automatic saving. These modes have no ChatGPT step, so their prompt dropdown is disabled. Settings are stored in the existing `state/botz-prompt-settings.txt` compatibility file.
 
@@ -71,7 +75,7 @@ In `display_on_website_app` mode, `NumpadEnter` opens the selected catalogue pro
 
 The same menu has a persistent **Testing mode** checkbox. When enabled, the automation writes a timestamped session trace, image-gallery count samples, relevant UIA element dumps, full accessibility trees at accepted image counts and failures, window state, coordinate actions, field verification results, and error details to `debug/`. Leave it off for normal runs; enable it before reproducing an intermittent problem and retain the matching `testing-session-*.log.txt` plus `testing-*-accessibility-tree.txt`/`testing-*-uia-element.txt` files.
 
-All modes process a maximum of 11 GO b2b image records per product. BOTZ attaches every supported image in the supplier folder to ChatGPT with `Ctrl+A`, avoiding fragile long filename lists. Its prompt requests image fields only for the naturally sorted first 11 images, and only those first 11 are parsed, uploaded and edited in GO b2b. Later attachments are reference context only. Ordinary and matrix modes likewise cap detected gallery work at the first 11 image records.
+All modes process a maximum of 11 GO b2b image records per product. Both supplier-product submodes attach every supported image in the matched supplier folder to ChatGPT with `Ctrl+A`, avoiding fragile long filename lists. BOTZ transforms its CMS stock code before matching under `C:\BOTZ\engobes`; Crystal Art matches the complete code (for example `CAFGR-34DNY126`) to the folder-name prefix under `C:\Crystal Art`. Each prompt requests image fields only for the naturally sorted first 11 images, and only those first 11 are parsed, uploaded and edited in GO b2b. Later attachments are reference context only. Ordinary and matrix modes likewise cap detected gallery work at the first 11 image records.
 
 Ordinary and matrix modes actively visit each available five-image carousel page while counting, because GO b2b can omit an unvisited third page from the accessibility tree. The detector keeps the highest realised total instead of summing retained pages. Each count sample checks the four expected control groups and re-verifies every returned element's localised UIA control type; Chrome exposes an Image control as `graphic`. Keep this explicit verification when changing gallery discovery, because the stable-count decision depends on those control counts agreeing. Attachment batches then open the gallery once, traverse sequentially, wait one second before each copy, and use Chrome's context-menu **Copy image** action on the high-quality preview. Each ChatGPT paste is confirmed from the draft's accessibility-tree attachment count before the batch continues. GO b2b image-metadata insertion verifies every carousel transition, opens the visible **Details** control through UIA, confirms the Title and Alt fields appeared before pasting, and waits for the gallery to return after every image Save.
 
@@ -84,7 +88,7 @@ State files are workflow contracts rather than general-purpose configuration. Lo
 Current persisted formats are:
 
 - `state/botz-prompt-settings.txt` — `CROMARTIE_BOTZ_PROMPT_SETTINGS_V1`
-- `state/botz-product-state.txt` — writer uses `CROMARTIE_BOTZ_STATE_V3`; loader also supports V2
+- `state/botz-product-state.txt` — compatibility path; writer uses `CROMARTIE_SUPPLIER_PRODUCT_STATE_V1`; loader also supports BOTZ V2/V3
 - `state/matrix-image-state.txt` — current writer and loader use `CROMARTIE_MATRIX_STATE_V3`
 - `state/matrix-full-state.txt` — `CROMARTIE_MATRIX_FULL_STATE_V3`
 
@@ -109,7 +113,7 @@ Use these ownership boundaries:
 
 When adding a mode:
 
-1. Register its stable mode ID and prompt choices in `Core/ModeRegistry.ahk`. A mode with no prompt should return an empty prompt-option list.
+1. Register its stable mode ID, submodes and submode-owned prompt choices in `Core/ModeRegistry.ahk`. A submode with no prompt should return an empty prompt-option list.
 2. Add only immutable configuration to `Core/Configuration.ahk` and only mutable startup state to `Core/RuntimeState.ahk`.
 3. Implement the mode in the appropriate `Modes/` or `Workflows/` file and add the smallest required dispatch branch in `Workflows/ProductDispatch.ahk`.
 4. If it uses ChatGPT, keep its prompt labels, parser acceptance rules and validation behavior aligned without consolidating intentionally different parsers.
@@ -133,6 +137,9 @@ Run the non-destructive checks from the repository root after every change:
 & 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut /Validate '.\cromartie-seo-automation.ahk'
 & 'C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe' /ErrorStdOut /Validate '.\test\test.ahk'
 Push-Location '.\tools\botz-scraper'
+npm.cmd test
+Pop-Location
+Push-Location '.\tools\crystal-art-scraper'
 npm.cmd test
 Pop-Location
 
