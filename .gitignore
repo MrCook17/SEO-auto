@@ -2,5 +2,6 @@ logs/
 backups/
 debug/
 tools/botz-scraper/node_modules/
+tools/crystal-art-scraper/node_modules/
 state/botz-prompt-settings.txt
 state/botz-prompt-settings.txt.tmp

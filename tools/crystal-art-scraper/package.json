@@ -1,0 +1,16 @@
+{
+  "name": "cromartie-crystal-art-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scrape selected Craft Buddy Crystal Art descriptions and size-capped JPEG images.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "sharp": "0.35.4"
+  }
+}

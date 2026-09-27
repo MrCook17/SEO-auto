@@ -53,6 +53,7 @@ The root script is intentionally only a bootstrap. It owns the directives, vendo
 ## Supplier scraper
 
 - `tools/botz-scraper/` — the existing BOTZ supplier workflow
+- `tools/crystal-art-scraper/` — list-driven Craft Buddy description and JPEG image scraper
 
 ## Department automation
 
